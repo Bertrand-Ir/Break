@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AllInclusive
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -89,7 +88,7 @@ fun TopBar(
             BreakMark(26.dp)
             InstrumentButton(state, compact = true) { toggle(Panel.Instruments) }
             TransposeControl(state)
-            SustainButton(state, showLabel = false)
+            PedalButton(state, showLabel = false)
             MetronomeGroup(state) { toggle(Panel.Metronome) }
             BeatGroup(state, userBeatName, compact = true) { toggle(Panel.Beats) }
             LooperGroup(state)
@@ -107,7 +106,7 @@ fun TopBar(
                 InstrumentButton(state, compact = compact) { toggle(Panel.Instruments) }
                 Spacer(Modifier.weight(1f))
                 TransposeControl(state)
-                SustainButton(state, showLabel = true)
+                PedalButton(state, showLabel = true)
                 IconChip(Icons.Rounded.Tune, "Settings", active = state.panel == Panel.Settings, badge = updateBadge, size = 44.dp) { toggle(Panel.Settings) }
             }
             Row(
@@ -159,15 +158,35 @@ private fun TransposeControl(state: BreakState) {
 }
 
 @Composable
-private fun SustainButton(state: BreakState, showLabel: Boolean) {
+private fun PedalButton(state: BreakState, showLabel: Boolean) {
     Row(
-        Modifier.height(44.dp).control(state.sustain).pressScale({ state.toggleSustain() }).padding(horizontal = 12.dp),
+        Modifier.height(44.dp).control(state.pedal).pressScale({ state.togglePedal() }).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Led(state.sustain)
-        Icon(Icons.Rounded.AllInclusive, "Sustain", tint = contentColor(state.sustain), modifier = Modifier.size(18.dp))
-        if (showLabel) Text("Sustain", style = Type.Label, color = contentColor(state.sustain))
+        Led(state.pedal)
+        PedalGlyph(contentColor(state.pedal), pressed = state.pedal)
+        if (showLabel) Text("Pedal", style = Type.Label, color = contentColor(state.pedal))
+    }
+}
+
+/** A piano damper pedal seen from the side; it tilts down when engaged. */
+@Composable
+private fun PedalGlyph(tint: Color, pressed: Boolean) {
+    Canvas(Modifier.size(20.dp)) {
+        val w = size.width; val h = size.height
+        val sw = 1.8.dp.toPx()
+        val tipY = if (pressed) h * 0.62f else h * 0.42f
+        drawLine(tint, Offset(w * 0.1f, h * 0.88f), Offset(w * 0.9f, h * 0.88f), sw, cap = StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.78f, h * 0.88f), Offset(w * 0.78f, h * 0.55f), sw, cap = StrokeCap.Round)
+        val p = androidx.compose.ui.graphics.Path().apply {
+            moveTo(w * 0.86f, h * 0.52f)
+            lineTo(w * 0.22f, tipY)
+            quadraticTo(w * 0.08f, tipY + h * 0.02f, w * 0.12f, tipY + h * 0.12f)
+            lineTo(w * 0.86f, h * 0.60f)
+            close()
+        }
+        drawPath(p, tint)
     }
 }
 

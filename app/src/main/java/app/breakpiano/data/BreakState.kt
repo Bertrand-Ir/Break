@@ -93,6 +93,8 @@ class BreakState(context: Context) {
     var smartMix: Boolean by bool("smartMix", true) { NativeEngine.setSmartMix(it) }
     var tuningA4: Int by int("tuningA4", 440) { applyTuning() }
     var transpose: Int by int("transpose", 0) { NativeEngine.setTranspose(it) }
+    /** How long the pedal keeps a released note ringing, in seconds. */
+    var pedalLength: Float by float("pedalLength", 1.6f) { if (pedal) NativeEngine.setPedal(it) }
 
     // ── Transport ──
     var bpm: Int by int("bpm", 90) { NativeEngine.setTempo(it.toFloat()) }
@@ -111,7 +113,7 @@ class BreakState(context: Context) {
     var autoUpdate: Boolean by bool("autoUpdate", true)
 
     // ── Runtime (not persisted) ──
-    var sustain by mutableStateOf(false)
+    var pedal by mutableStateOf(false)
     var metronomeOn by mutableStateOf(false)
     var beatPlaying by mutableStateOf(false)
     var beatStatus by mutableIntStateOf(-1)
@@ -145,14 +147,15 @@ class BreakState(context: Context) {
         NativeEngine.setBeatKey(beatKey)
         NativeEngine.setBassEnabled(bassOn)
         NativeEngine.setUserTrackLoop(userLoop)
-        NativeEngine.setSustain(sustain)
+        NativeEngine.setSustain(false)
+        NativeEngine.setPedal(if (pedal) pedalLength else 0f)
         NativeEngine.setLoopVolume(loopVol)
         loadPattern()
     }
 
     /** Called after the audio stream was torn down (app backgrounded). */
     fun onEngineStopped() {
-        sustain = false
+        pedal = false
         metronomeOn = false
         beatPlaying = false
         userTrackPlaying = false
@@ -163,9 +166,9 @@ class BreakState(context: Context) {
     private fun applyVolumes() = NativeEngine.setVolumes(keysVol, beatVol, userVol, metroVol, masterVol)
     private fun applyTuning() = NativeEngine.setTuning((12.0 * log2(tuningA4 / 440.0)).toFloat())
 
-    fun toggleSustain() {
-        sustain = !sustain
-        NativeEngine.setSustain(sustain)
+    fun togglePedal() {
+        pedal = !pedal
+        NativeEngine.setPedal(if (pedal) pedalLength else 0f)
     }
 
     fun toggleMetronome() {

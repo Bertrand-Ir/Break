@@ -23,6 +23,8 @@ object NativeEngine {
     external fun allNotesOff()
     external fun panic()
     external fun setSustain(on: Boolean)
+    /** Pedal: released notes keep ringing for [seconds], then fade. 0 = pedal up. */
+    external fun setPedal(seconds: Float)
     external fun setInstrument(bank: Int, program: Int)
     /** bank = -1 disables the layer. */
     external fun setLayer(bank: Int, program: Int)

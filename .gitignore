@@ -19,3 +19,9 @@ keystore/
 *.keystore
 keystore.properties
 .kotlin/
+
+# Original card art (only the compressed WebP copies in assets ship)
+art/**/*.png
+art/**/*.jpg
+art/**/*.jpeg
+art/**/*.webp

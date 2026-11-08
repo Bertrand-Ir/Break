@@ -126,6 +126,8 @@ void Engine::stop() {
     }
     if (beat_) tsf_note_off_all(beat_);
     for (int &p : playing_) p = -1;
+    for (auto &t : pedalOff_) t = 0;
+    pedalPending_ = 0;
     beatActive_ = false; running_ = false; tick_ = 0.0;
     userPlaying = false; uiBeatPlaying = false; uiBeat = -1;
     bass_.kill();
@@ -218,6 +220,7 @@ void Engine::drainCommands() {
                     tsf_channel_note_off(keys_, 1, playing_[key]);
                 }
                 const int n = std::clamp(key + transpose.load(std::memory_order_relaxed), 0, 127);
+                if (pedalOff_[n]) releasePedalNote(n);
                 tsf_channel_note_on(keys_, 0, n, c.f);
                 if (layerOn_) tsf_channel_note_on(keys_, 1, n, c.f);
                 playing_[key] = n;
@@ -227,8 +230,15 @@ void Engine::drainCommands() {
                 const int key = c.a & 127;
                 const int n = playing_[key];
                 if (n >= 0) {
-                    tsf_channel_note_off(keys_, 0, n);
-                    tsf_channel_note_off(keys_, 1, n);
+                    const float ped = pedalSec.load(std::memory_order_relaxed);
+                    if (ped > 0.f) {
+                        // Pedal down: let it ring a while longer, then release naturally.
+                        if (!pedalOff_[n]) pedalPending_++;
+                        pedalOff_[n] = std::max<int64_t>(1, frameClock_ + (int64_t) (ped * sampleRate_));
+                    } else {
+                        tsf_channel_note_off(keys_, 0, n);
+                        tsf_channel_note_off(keys_, 1, n);
+                    }
                     playing_[key] = -1;
                 }
                 break;
@@ -237,6 +247,8 @@ void Engine::drainCommands() {
                 tsf_channel_note_off_all(keys_, 0);
                 tsf_channel_note_off_all(keys_, 1);
                 for (int &p : playing_) p = -1;
+                for (auto &t : pedalOff_) t = 0;
+                pedalPending_ = 0;
                 break;
             case C_SUSTAIN:
                 tsf_channel_set_sustain(keys_, 0, c.a);
@@ -309,6 +321,8 @@ void Engine::drainCommands() {
                 tsf_channel_sounds_off_all(beat_, 1);
                 bass_.kill();
                 for (int &p : playing_) p = -1;
+                for (auto &t : pedalOff_) t = 0;
+                pedalPending_ = 0;
                 break;
         }
     }
@@ -338,7 +352,19 @@ void Engine::scheduleOff(int ch, int note, int64_t at) {
     if (free) { free->at = at; free->ch = (int16_t) ch; free->note = (int16_t) note; free->on = true; }
 }
 
+void Engine::releasePedalNote(int n) {
+    tsf_channel_note_off(keys_, 0, n);
+    tsf_channel_note_off(keys_, 1, n);
+    pedalOff_[n] = 0;
+    if (pedalPending_ > 0) pedalPending_--;
+}
+
 void Engine::processOffs() {
+    if (pedalPending_ > 0) {
+        const bool up = pedalSec.load(std::memory_order_relaxed) <= 0.f;
+        for (int n = 0; n < 128; n++)
+            if (pedalOff_[n] && (up || pedalOff_[n] <= frameClock_)) releasePedalNote(n);
+    }
     for (Off &o : offs_) {
         if (o.on && o.at <= frameClock_) {
             tsf_channel_note_off(beat_, o.ch, o.note);

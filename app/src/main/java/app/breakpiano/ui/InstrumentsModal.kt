@@ -203,17 +203,19 @@ private fun InstrumentCard(
     ) {
         // art stage
         Box(
-            Modifier.fillMaxWidth().aspectRatio(1.45f).padding(8.dp)
+            Modifier.fillMaxWidth().aspectRatio(4f / 3f).padding(8.dp)
                 .clip(RoundedCornerShape(13.dp)).background(Brand.Night),
             contentAlignment = Alignment.Center,
         ) {
             val t = rememberInfiniteTransition(label = "pv")
-            val pulse by t.animateFloat(1f, 1.05f, infiniteRepeatable(tween(420), RepeatMode.Reverse), label = "pulse")
+            val pulse by t.animateFloat(1f, 1.04f, infiniteRepeatable(tween(420), RepeatMode.Reverse), label = "pulse")
             val k = if (previewing) pulse else 1f
-            InstrumentArt(
-                artFor(inst), Brand.Ivory,
-                Modifier.fillMaxSize().padding(10.dp).graphicsLayer { scaleX = k; scaleY = k },
-            )
+            AssetPhoto("inst", inst.id, Modifier.fillMaxSize().graphicsLayer { scaleX = k; scaleY = k }) {
+                InstrumentArt(
+                    artFor(inst), Brand.Ivory,
+                    Modifier.fillMaxSize().padding(10.dp).graphicsLayer { scaleX = k; scaleY = k },
+                )
+            }
             if (selected) {
                 Box(
                     Modifier.align(Alignment.TopStart).padding(8.dp).size(24.dp).clip(CircleShape).background(Brand.Ivory),

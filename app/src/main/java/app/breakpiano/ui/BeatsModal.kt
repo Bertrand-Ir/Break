@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -214,8 +215,20 @@ private fun StyleCard(style: BeatStyle, variation: Int, selected: Boolean, playi
             .pressScale(onClick, pressedScale = 0.97f)
             .padding(12.dp),
     ) {
-        Box(Modifier.fillMaxWidth().height(78.dp).clip(RoundedCornerShape(12.dp)).background(Brand.Night).padding(8.dp)) {
-            PatternPreview(style, variation, if (playing) beatStatus else -1, Modifier.fillMaxSize())
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        if (AssetPhotos.has(ctx, "beat", style.id)) {
+            // Photo with the live pattern grid on a dark band along the bottom
+            Box(Modifier.fillMaxWidth().aspectRatio(16f / 10f).clip(RoundedCornerShape(12.dp)).background(Brand.Night)) {
+                AssetPhoto("beat", style.id, Modifier.fillMaxSize()) {}
+                Box(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(40.dp)
+                        .background(Color.Black.copy(alpha = 0.62f)).padding(horizontal = 8.dp, vertical = 6.dp),
+                ) { PatternPreview(style, variation, if (playing) beatStatus else -1, Modifier.fillMaxSize()) }
+            }
+        } else {
+            Box(Modifier.fillMaxWidth().height(78.dp).clip(RoundedCornerShape(12.dp)).background(Brand.Night).padding(8.dp)) {
+                PatternPreview(style, variation, if (playing) beatStatus else -1, Modifier.fillMaxSize())
+            }
         }
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {

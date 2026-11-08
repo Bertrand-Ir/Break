@@ -129,6 +129,8 @@ public:
     std::atomic<float> userSeek{-1.f};
     std::atomic<bool> recording{false};
     std::atomic<float> loopVol{0.9f};
+    /** Pedal: seconds a released note keeps ringing before it fades (0 = pedal up). */
+    std::atomic<float> pedalSec{0.f};
 
     // ── status for the UI ──
     std::atomic<int> uiBeat{-1};
@@ -167,6 +169,9 @@ private:
     // keys state (audio thread)
     int playing_[128];
     bool layerOn_ = false;
+    int64_t pedalOff_[128]{};   // frame at which a pedal-held note is released (0 = none)
+    int pedalPending_ = 0;
+    void releasePedalNote(int n);
 
     // transport (audio thread)
     bool running_ = false;

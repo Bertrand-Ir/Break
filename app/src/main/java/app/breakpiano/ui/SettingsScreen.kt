@@ -153,7 +153,6 @@ private fun KeyboardSettings(state: BreakState) {
         Segmented(listOf("♯ Sharps", "♭ Flats"), if (state.useFlats) 1 else 0, { state.useFlats = it == 1 }, Modifier.width(220.dp))
     }
     ToggleRow("Octave numbers", "C4, Do4 … middle C is marked with an ember dot", state.showOctave) { state.showOctave = it }
-    ToggleRow("Key glow", "Ember light under every key you play", state.keyGlow) { state.keyGlow = it }
 }
 
 @Composable
@@ -162,6 +161,12 @@ private fun TouchSettings(state: BreakState) {
     ToggleRow("Touch dynamics", "Play near the front edge of a key for louder notes, near the back for softer — like a real action", state.dynamicVelocity) { state.dynamicVelocity = it }
     if (!state.dynamicVelocity) {
         SliderRow("Fixed velocity", state.fixedVelocity, { state.fixedVelocity = it }, "${(state.fixedVelocity * 127).roundToInt()}", range = 0.2f..1f)
+    }
+    SectionLabel("Pedal")
+    val lengths = listOf(0.8f, 1.6f, 3.0f)
+    SettingRow("Pedal length", "How long notes keep ringing after you lift your finger while Pedal is on") {
+        Segmented(listOf("Short", "Medium", "Long"), lengths.indexOfFirst { kotlin.math.abs(it - state.pedalLength) < 0.05f },
+            { state.pedalLength = lengths[it] }, Modifier.width(260.dp))
     }
     SectionLabel("Feel")
     ToggleRow("Glissando", "Slide your finger across keys to sweep notes", state.glissando) { state.glissando = it }

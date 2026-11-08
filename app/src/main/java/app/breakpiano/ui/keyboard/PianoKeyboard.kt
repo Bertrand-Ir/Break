@@ -245,9 +245,12 @@ fun PianoKeys(
                     0.92f to Color(0xFFF3EEE5), 1f to Color(0xFFE5DED1), startY = 0f, endY = h,
                 )
                 val whitePressed = Brush.verticalGradient(
-                    0f to Color(0xFFB4AD9F), 0.07f to Color(0xFFDCD6CB), 0.55f to Color(0xFFEAE5DB),
-                    1f to Color(0xFFDBD3C5), startY = 0f, endY = h,
+                    0f to Color(0xFFA9A59E), 0.10f to Color(0xFFC6C2BB), 0.6f to Color(0xFFCFCBC4),
+                    1f to Color(0xFFC4C0B8), startY = 0f, endY = h,
                 )
+                val sideShadowW = max(dp1 * 2.5f, kw * 0.07f)
+                val sideShadowL = Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.30f), Color.Transparent), startX = 0f, endX = sideShadowW)
+                val sideShadowR = Brush.horizontalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.30f)), startX = kw - sideShadowW, endX = kw)
                 val lipBrushN = Brush.verticalGradient(listOf(Color(0xFFD8D0C1), Color(0xFFA59B8A)), startY = h - lipN, endY = h)
                 val lipBrushP = Brush.verticalGradient(listOf(Color(0xFFC9C0B0), Color(0xFF9C9282)), startY = h - lipP, endY = h)
                 val blackBody = Brush.verticalGradient(
@@ -256,6 +259,10 @@ fun PianoKeys(
                 val inset = bw * 0.11f
                 val blackTop = Brush.horizontalGradient(
                     0f to Color(0xFF16161A), 0.35f to Color(0xFF2A2A31), 0.6f to Color(0xFF24242A), 1f to Color(0xFF141417),
+                    startX = inset, endX = bw - inset,
+                )
+                val blackTopPressed = Brush.horizontalGradient(
+                    0f to Color(0xFF2A2A30), 0.4f to Color(0xFF3B3B42), 1f to Color(0xFF26262B),
                     startX = inset, endX = bw - inset,
                 )
                 val bevN = bh * 0.10f
@@ -277,8 +284,6 @@ fun PianoKeys(
                     @Suppress("UNUSED_VARIABLE") val v = model.version
                     val s = start()
                     geo.width = w; geo.height = h; geo.start = s; geo.visible = visible
-                    val now = SystemClock.uptimeMillis()
-                    val glowOn = state.keyGlow
                     val mode = state.labelMode
                     val solfege = state.notation == Notation.Solfege
                     val flats = state.useFlats
@@ -294,31 +299,27 @@ fun PianoKeys(
                         val note = PianoLayout.whites[j]
                         val left = (j - s) * ww + gap / 2
                         val pressed = model.down[note] > 0
-                        val glow = if (glowOn) model.glow(note, now) else 0f
                         val lip = if (pressed) lipP else lipN
 
                         drawRoundRect(if (pressed) whitePressed else whiteBody, Offset(left, -r), Size(kw, h + r), CornerRadius(r))
                         clipRect(left, h - lip, left + kw, h) {
                             drawRoundRect(if (pressed) lipBrushP else lipBrushN, Offset(left, h - lip - r), Size(kw, lip + r), CornerRadius(r))
                         }
-                        drawLine(Color.White.copy(alpha = 0.7f), Offset(left + r * 0.6f, h - lip), Offset(left + kw - r * 0.6f, h - lip), dp1)
-                        drawRect(Color.White.copy(alpha = 0.6f), Offset(left, 0f), Size(dp1, h - lip - r * 0.5f))
-                        drawRect(Color.Black.copy(alpha = 0.07f), Offset(left + kw - dp1 * 1.5f, 0f), Size(dp1 * 1.5f, h - lip - r * 0.5f))
+                        drawLine(Color.White.copy(alpha = if (pressed) 0.35f else 0.7f), Offset(left + r * 0.6f, h - lip), Offset(left + kw - r * 0.6f, h - lip), dp1)
                         if (pressed) {
-                            // the key dips under the fallboard: deeper top shadow
+                            // Sunk below its neighbours: they cast shadow onto both edges,
+                            // and the fallboard casts a deeper shadow across the top.
+                            translate(left, 0f) {
+                                drawRect(sideShadowL, size = Size(sideShadowW, h - lip))
+                                drawRect(sideShadowR, Offset(kw - sideShadowW, 0f), Size(sideShadowW, h - lip))
+                            }
                             drawRect(
-                                Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.22f), Color.Transparent), startY = feltH, endY = feltH + h * 0.18f),
-                                Offset(left, 0f), Size(kw, feltH + h * 0.18f),
+                                Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.32f), Color.Transparent), startY = feltH, endY = feltH + h * 0.22f),
+                                Offset(left, 0f), Size(kw, feltH + h * 0.22f),
                             )
-                        }
-                        if (glow > 0f) {
-                            drawRect(
-                                Brush.radialGradient(
-                                    listOf(Brand.Ember.copy(alpha = 0.40f * glow), Brand.Ember.copy(alpha = 0f)),
-                                    center = Offset(left + kw / 2, h - lip), radius = kw * 1.15f,
-                                ),
-                                Offset(left, 0f), Size(kw, h - lip),
-                            )
+                        } else {
+                            drawRect(Color.White.copy(alpha = 0.6f), Offset(left, 0f), Size(dp1, h - lip - r * 0.5f))
+                            drawRect(Color.Black.copy(alpha = 0.07f), Offset(left + kw - dp1 * 1.5f, 0f), Size(dp1 * 1.5f, h - lip - r * 0.5f))
                         }
 
                         // label
@@ -328,14 +329,13 @@ fun PianoKeys(
                             LabelMode.C -> pc == 0
                             else -> true
                         }
-                        val labelBottom = h - lipN - 7.dp.toPx()
+                        val labelBottom = h - lipN - 7.dp.toPx() + if (pressed) 2.dp.toPx() else 0f
                         var labelTop = labelBottom
                         if (showLabel) {
                             val name = PianoLayout.name(note, solfege, flats)
                             val base = if (pc == 0) labelStyleC else labelStyle
-                            val style = if (pressed || glow > 0.5f) base.copy(color = Brand.Ember) else base
-                            val main = measurer.measure(name, style)
-                            val oct = if (showOct) measurer.measure(PianoLayout.octave(note).toString(), if (pressed) octStyle.copy(color = Brand.Ember) else octStyle) else null
+                            val main = measurer.measure(name, base)
+                            val oct = if (showOct) measurer.measure(PianoLayout.octave(note).toString(), octStyle) else null
                             val totalW = main.size.width + (oct?.size?.width ?: 0)
                             val tx = left + (kw - totalW) / 2
                             labelTop = labelBottom - main.size.height
@@ -343,7 +343,7 @@ fun PianoKeys(
                             if (oct != null) drawText(oct, topLeft = Offset(tx + main.size.width, labelBottom - oct.size.height - main.size.height * 0.08f))
                         }
                         if (note == 60) {
-                            drawCircle(Brand.Ember.copy(alpha = 0.85f), radius = 2.2f * dp1, center = Offset(left + kw / 2, labelTop - 6 * dp1))
+                            drawCircle(Color(0xFF8E877B), radius = 2.2f * dp1, center = Offset(left + kw / 2, labelTop - 6 * dp1))
                         }
                     }
 
@@ -355,14 +355,20 @@ fun PianoKeys(
                         val bx = cx - bw / 2
                         if (bx > w || bx + bw < 0) continue
                         val pressed = model.down[bn] > 0
-                        val glow = if (glowOn) model.glow(bn, now) else 0f
                         val bev = if (pressed) bevP else bevN
                         translate(bx, 0f) {
                             val sh = if (pressed) 1.5f * dp1 else 3f * dp1
                             drawRoundRect(Color.Black.copy(alpha = 0.28f), Offset(sh, -r), Size(bw, bh + sh * 1.6f + r), CornerRadius(rb * 1.5f))
                             drawRoundRect(blackBody, Offset(0f, -r), Size(bw, bh + r), CornerRadius(rb))
-                            drawRoundRect(blackTop, Offset(inset, -r), Size(bw - inset * 2, bh - bev + r), CornerRadius(rb * 0.8f))
-                            drawRoundRect(gloss, Offset(inset + (bw - 2 * inset) * 0.16f, 0f), Size((bw - 2 * inset) * 0.2f, (bh - bev) * 0.86f), CornerRadius(rb))
+                            drawRoundRect(if (pressed) blackTopPressed else blackTop, Offset(inset, -r), Size(bw - inset * 2, bh - bev + r), CornerRadius(rb * 0.8f))
+                            if (pressed) {
+                                // pushed down between the white keys: shadow falls over its upper part
+                                drawRect(
+                                    Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Transparent), startY = feltH, endY = bh * 0.35f),
+                                    Offset(0f, 0f), Size(bw, bh * 0.35f),
+                                )
+                            }
+                            if (!pressed) drawRoundRect(gloss, Offset(inset + (bw - 2 * inset) * 0.16f, 0f), Size((bw - 2 * inset) * 0.2f, (bh - bev) * 0.86f), CornerRadius(rb))
                             bevelPath.reset()
                             bevelPath.moveTo(inset, bh - bev)
                             bevelPath.lineTo(bw - inset, bh - bev)
@@ -371,42 +377,16 @@ fun PianoKeys(
                             bevelPath.close()
                             drawPath(bevelPath, if (pressed) bevelP else bevelN)
                             drawLine(Color.White.copy(alpha = if (pressed) 0.08f else 0.16f), Offset(inset, bh - bev), Offset(bw - inset, bh - bev), dp1)
-                            if (glow > 0f) {
-                                drawRoundRect(
-                                    Brush.verticalGradient(listOf(Brand.Ember.copy(alpha = 0f), Brand.Ember.copy(alpha = 0.55f * glow)), startY = bh * 0.45f, endY = bh),
-                                    Offset(0f, bh * 0.45f), Size(bw, bh * 0.55f), CornerRadius(rb),
-                                )
-                            }
                             if (mode == LabelMode.All) {
-                                val t = measurer.measure(PianoLayout.name(bn, solfege, flats), if (pressed) blackLabelStyle.copy(color = Brand.Ember) else blackLabelStyle)
+                                val t = measurer.measure(PianoLayout.name(bn, solfege, flats), blackLabelStyle)
                                 drawText(t, topLeft = Offset((bw - t.size.width) / 2, bh - bev - t.size.height - 4 * dp1))
                             }
                         }
                     }
 
-                    // ── felt strip + ember light bar ──
+                    // ── felt strip ──
                     drawRect(feltShadow, Offset(0f, feltH), Size(w, 12.dp.toPx()))
                     drawRect(feltBrush, size = Size(w, feltH))
-                    if (glowOn) {
-                        for (j in max(0, first - 1)..last) {
-                            val note = PianoLayout.whites[j]
-                            for (n in intArrayOf(note, note + 1)) {
-                                if (n > PianoLayout.LAST || (n != note && !PianoLayout.isBlack(n))) continue
-                                val g = model.glow(n, now)
-                                if (g <= 0f) continue
-                                val cxk = if (n == note) (j - s) * ww + ww / 2 else (j + 1 + PianoLayout.blackOffset(n) - s) * ww
-                                val half = if (n == note) kw / 2 else bw / 2
-                                drawRect(
-                                    Brush.radialGradient(
-                                        listOf(Brand.Ember.copy(alpha = 0.45f * g), Color.Transparent),
-                                        center = Offset(cxk, feltH), radius = ww * 1.1f,
-                                    ),
-                                    Offset(cxk - ww * 1.1f, 0f), Size(ww * 2.2f, feltH + ww * 1.1f),
-                                )
-                                drawRect(Brand.Ember.copy(alpha = 0.95f * g), Offset(cxk - half, feltH - 2.5f * dp1), Size(half * 2, 2.5f * dp1))
-                            }
-                        }
-                    }
                 }
             },
     )
@@ -451,14 +431,14 @@ fun KeyboardMiniMap(
             val s = start()
             for (j in 0 until PianoLayout.whiteCount) {
                 val n = PianoLayout.whites[j]
-                val c = if (model.down[n] > 0) Brand.Ember else Color(0xFFD9D3C8)
+                val c = if (model.down[n] > 0) Color(0xFF8C8880) else Color(0xFFD9D3C8)
                 drawRect(c, Offset(j * kw + 0.5f, 1f), Size(kw - 1f, h - 2f))
             }
             for (j in 0 until PianoLayout.whiteCount) {
                 val bn = PianoLayout.whites[j] + 1
                 if (bn > PianoLayout.LAST || !PianoLayout.isBlack(bn)) continue
                 val cx = (j + 1) * kw
-                val c = if (model.down[bn] > 0) Brand.Ember else Color(0xFF16161A)
+                val c = if (model.down[bn] > 0) Color(0xFF5E5E66) else Color(0xFF16161A)
                 drawRect(c, Offset(cx - kw * 0.32f, 1f), Size(kw * 0.64f, h * 0.6f))
             }
             // dim what's off-screen, frame what's on-screen

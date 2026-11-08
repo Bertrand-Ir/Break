@@ -31,6 +31,7 @@ JFN(void, noteOff)(JNIEnv *, jobject, jint key) { E().push(C_NOTE_OFF, key); }
 JFN(void, allNotesOff)(JNIEnv *, jobject) { E().push(C_ALL_OFF); }
 JFN(void, panic)(JNIEnv *, jobject) { E().push(C_PANIC); }
 JFN(void, setSustain)(JNIEnv *, jobject, jboolean on) { E().push(C_SUSTAIN, on ? 1 : 0); }
+JFN(void, setPedal)(JNIEnv *, jobject, jfloat seconds) { E().pedalSec = std::max(0.f, (float) seconds); }
 JFN(void, setInstrument)(JNIEnv *, jobject, jint bank, jint program) { E().push(C_PRESET, bank, program); }
 JFN(void, setLayer)(JNIEnv *, jobject, jint bank, jint program) { E().push(C_LAYER, bank, program); }
 JFN(void, setLayerMix)(JNIEnv *, jobject, jfloat mix) { E().layerMix = mix; }
