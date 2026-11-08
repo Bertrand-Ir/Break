@@ -24,8 +24,8 @@ object Arrange {
      *  • drops "ghost" notes that are really overtones of a louder note starting at the same time;
      *  • re-joins a sustained note that the detector split in two as it decayed.
      */
-    fun clean(raw: List<SongNote>): List<SongNote> {
-        val sorted = raw.sortedBy { it.start }
+    fun clean(raw: List<SongNote>, voice: Boolean = false): List<SongNote> {
+        val sorted = (if (voice) voiceLine(raw) else raw).sortedBy { it.start }
         val keep = BooleanArray(sorted.size) { true }
         for (i in sorted.indices) {
             val b = sorted[i]
@@ -55,6 +55,42 @@ object Arrange {
             } else {
                 lastByPitch[n.pitch] = out.size
                 out += n
+            }
+        }
+        return out
+    }
+
+    /**
+     * Singing / humming: one note at a time, short pitch wobbles absorbed into the note around
+     * them, and same-pitch fragments joined across small breaths.
+     */
+    private fun voiceLine(raw: List<SongNote>): List<SongNote> {
+        val sorted = raw.sortedBy { it.start }
+        // keep the strongest note at each moment (a voice only sings one)
+        val mono = ArrayList<SongNote>()
+        for (n in sorted) {
+            val last = mono.lastOrNull()
+            if (last != null && n.start < last.end - 0.03f) {
+                if (n.velocity > last.velocity * 1.15f && n.end - n.start > 0.12f) {
+                    mono[mono.lastIndex] = last.copy(end = n.start)
+                    mono += n
+                }
+                continue
+            }
+            mono += n
+        }
+        // absorb blips (< 110 ms) into the previous note, join same-pitch fragments
+        val out = ArrayList<SongNote>()
+        for (n in mono.filter { it.end - it.start > 0.03f }) {
+            val last = out.lastOrNull()
+            when {
+                last != null && n.end - n.start < 0.11f && n.start - last.end < 0.08f -> out[out.lastIndex] = last.copy(end = n.end)
+                // same pitch: vibrato splits a sung note into fragments that continue more softly — join them.
+                // A deliberately repeated note comes back with a fresh, stronger attack — keep it separate.
+                last != null && n.pitch == last.pitch && n.start - last.end < 0.15f &&
+                    !(n.velocity > last.velocity * 1.02f && n.end - n.start >= 0.15f) ->
+                    out[out.lastIndex] = last.copy(end = n.end)
+                n.end - n.start >= 0.11f -> out += n
             }
         }
         return out

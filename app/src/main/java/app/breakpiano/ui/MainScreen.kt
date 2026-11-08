@@ -49,6 +49,7 @@ import app.breakpiano.learn.Learner
 import app.breakpiano.learn.Song
 import app.breakpiano.ui.learn.LearnBar
 import app.breakpiano.ui.learn.SongsModal
+import app.breakpiano.ui.learn.ListenControls
 import app.breakpiano.audio.Recorder
 import app.breakpiano.audio.Take
 import app.breakpiano.audio.UserBeat
@@ -77,6 +78,7 @@ fun MainScreen(
     onImportSongMidi: () -> Unit,
     onLearnSong: (Song) -> Unit,
     onDeleteSong: (Song) -> Unit,
+    listen: ListenControls,
     ready: Boolean,
     importProgress: Float?,
     onImport: () -> Unit,
@@ -176,7 +178,7 @@ fun MainScreen(
             visible = state.panel == Panel.Learn,
             enter = fadeIn(tween(160)) + scaleIn(initialScale = 0.97f),
             exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.97f),
-        ) { SongsModal(state, songs, importStage, onImportSongAudio, onImportSongMidi, onLearnSong, onDeleteSong) }
+        ) { SongsModal(state, songs, importStage, onImportSongAudio, onImportSongMidi, onLearnSong, onDeleteSong, listen) }
 
         AnimatedVisibility(
             visible = state.panel == Panel.Settings,

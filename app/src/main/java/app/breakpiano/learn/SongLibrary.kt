@@ -24,8 +24,12 @@ data class Song(
     val fromMidi: Boolean,
     val sampleRate: Int = 0,
     val frames: Int = 0,
+    /** "file", "midi", "listen" (heard through the mic) or "voice" (sung / hummed). */
+    val source: String = if (fromMidi) "midi" else "file",
 ) {
     val hasAudio get() = frames > 0
+    val isVoice get() = source == "voice"
+    val sourceLabel get() = when (source) { "midi" -> "MIDI"; "listen" -> "Listened"; "voice" -> "Sung"; else -> "Transcribed" }
 }
 
 /** Songs you learn: transcribed from audio (keeps the audio for play-along) or imported MIDI. */
@@ -42,7 +46,8 @@ class SongLibrary(context: Context) {
                 for (i in 0 until arr.length()) {
                     val o = arr.getJSONObject(i)
                     val s = Song(o.getString("id"), o.getString("title"), o.getLong("dur"), o.getInt("notes"),
-                        o.optBoolean("midi"), o.optInt("rate"), o.optInt("frames"))
+                        o.optBoolean("midi"), o.optInt("rate"), o.optInt("frames"),
+                        o.optString("source", if (o.optBoolean("midi")) "midi" else "file"))
                     if (notesFile(s.id).exists()) songs += s
                 }
             }
@@ -56,7 +61,7 @@ class SongLibrary(context: Context) {
         val arr = JSONArray()
         songs.forEach { s ->
             arr.put(JSONObject().put("id", s.id).put("title", s.title).put("dur", s.durationMs).put("notes", s.noteCount)
-                .put("midi", s.fromMidi).put("rate", s.sampleRate).put("frames", s.frames))
+                .put("midi", s.fromMidi).put("rate", s.sampleRate).put("frames", s.frames).put("source", s.source))
         }
         index.writeText(arr.toString())
     }
@@ -95,6 +100,35 @@ class SongLibrary(context: Context) {
             pcm.delete(); notesFile(id).delete()
             throw t
         }
+    }
+
+    /** A fresh id + PCM file for a microphone take. */
+    fun newRecording(): Pair<String, File> = UUID.randomUUID().toString().take(12).let { it to pcmFile(it) }
+
+    /** Transcribes a microphone take (a song playing nearby, or your voice). */
+    suspend fun importRecording(id: String, take: MicListener.Take, voice: Boolean, onStage: (String, Float) -> Unit): Song =
+        withContext(Dispatchers.Default) {
+            try {
+                require(take.frames > take.sampleRate) { "That was too short — record at least a couple of seconds." }
+                val notes = Transcriber(app).transcribe(take.file, take.sampleRate) { p ->
+                    onStage(if (p < 0.15f) "Preparing audio…" else if (p < 0.9f) "Listening for notes…" else "Writing the keys…", p)
+                }
+                require(notes.isNotEmpty()) { if (voice) "Couldn't hear a clear tune — try humming a bit louder, closer to the phone." else "Couldn't hear clear notes — turn the music up or move closer." }
+                writeNotes(id, notes)
+                val stamp = java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+                val song = Song(id, (if (voice) "Sung melody · " else "Listened · ") + stamp, take.frames * 1000L / take.sampleRate,
+                    notes.size, fromMidi = false, sampleRate = take.sampleRate, frames = take.frames, source = if (voice) "voice" else "listen")
+                withContext(Dispatchers.Main) { songs.add(0, song); save() }
+                song
+            } catch (t: Throwable) {
+                take.file.delete(); notesFile(id).delete()
+                throw t
+            }
+        }
+
+    fun rename(song: Song, title: String) {
+        val i = songs.indexOfFirst { it.id == song.id }
+        if (i >= 0 && title.isNotBlank()) { songs[i] = song.copy(title = title.trim()); save() }
     }
 
     suspend fun importMidi(uri: Uri): Song = withContext(Dispatchers.IO) {

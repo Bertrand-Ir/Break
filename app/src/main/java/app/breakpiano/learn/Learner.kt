@@ -67,7 +67,7 @@ class Learner(private val library: SongLibrary, private val state: BreakState, p
         close()
         scope.launch {
             loading = true
-            raw = library.loadNotes(s).let { if (s.fromMidi) it else Arrange.clean(it) }
+            raw = library.loadNotes(s).let { if (s.fromMidi) it else Arrange.clean(it, voice = s.isVoice) }
             song = s
             arrangement = if (s.fromMidi) Arrangement.Full else Arrangement.Melody
             notes = Arrange.build(raw, arrangement)

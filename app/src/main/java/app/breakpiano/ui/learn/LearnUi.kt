@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -56,6 +57,7 @@ import app.breakpiano.learn.Arrangement as Part
 import app.breakpiano.learn.Hands
 import app.breakpiano.learn.Learner
 import app.breakpiano.learn.Listen
+import app.breakpiano.learn.MicListener
 import app.breakpiano.learn.Song
 import app.breakpiano.ui.components.BigModal
 import app.breakpiano.ui.components.GhostButton
@@ -131,6 +133,7 @@ fun SongsModal(
     onImportMidi: () -> Unit,
     onLearn: (Song) -> Unit,
     onDelete: (Song) -> Unit,
+    listen: ListenControls,
 ) {
     BigModal(
         title = "Learn songs",
@@ -138,9 +141,11 @@ fun SongsModal(
         onClose = { state.panel = Panel.None },
         headerExtra = {
             Spacer(Modifier.weight(1f))
-            PrimaryButton("Import audio", Modifier.height(40.dp), icon = Icons.Rounded.GraphicEq) { if (importStage == null) onImportAudio() }
+            PrimaryButton("Listen", Modifier.height(40.dp), icon = Icons.Rounded.Mic) { if (importStage == null) listen.onOpen() }
             Spacer(Modifier.width(8.dp))
-            GhostButton("Import MIDI", Modifier.height(40.dp), icon = Icons.Rounded.MusicNote) { if (importStage == null) onImportMidi() }
+            GhostButton("Import audio", Modifier.height(40.dp), icon = Icons.Rounded.GraphicEq) { if (importStage == null && !listen.mic.recording) onImportAudio() }
+            Spacer(Modifier.width(8.dp))
+            GhostButton("Import MIDI", Modifier.height(40.dp), icon = Icons.Rounded.MusicNote) { if (importStage == null && !listen.mic.recording) onImportMidi() }
         },
     ) {
         LazyVerticalGrid(
@@ -150,6 +155,9 @@ fun SongsModal(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (listen.open && importStage == null) {
+                item(span = { GridItemSpan(maxLineSpan) }) { ListenPanel(listen) }
+            }
             if (importStage != null) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Row(Modifier.fillMaxWidth().well().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -165,8 +173,8 @@ fun SongsModal(
             }
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Text(
-                    "Works best with clear recordings: a solo piano or guitar, a singer, or you humming the melody. " +
-                        "Full band mixes work too — use Melody to learn the tune. MIDI files give perfect, exact notes.",
+                    "Listen hears any song playing near your phone — or you singing it. Clear recordings give the best keys; " +
+                        "for full band mixes, learn with Melody. MIDI files give perfect, exact notes.",
                     style = Type.Body, color = Brand.Dim,
                 )
             }
@@ -176,7 +184,7 @@ fun SongsModal(
                         Icon(Icons.Rounded.School, null, tint = Brand.Dim, modifier = Modifier.size(44.dp))
                         Spacer(Modifier.height(10.dp))
                         Text("Your songs will appear here", style = Type.Heading, color = Brand.Mist)
-                        Text("Import an audio file or a MIDI file to get started.", style = Type.Body, color = Brand.Dim)
+                        Text("Tap Listen and play a song or hum a tune — or import an audio or MIDI file.", style = Type.Body, color = Brand.Dim)
                     }
                 }
             }
@@ -193,12 +201,12 @@ private fun SongCard(song: Song, onLearn: () -> Unit, onDelete: () -> Unit) {
     Column(Modifier.fillMaxWidth().clip(shape).background(Brand.Slate).border(1.dp, Brand.SlateHi, shape).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(46.dp).well(RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                Icon(if (song.fromMidi) Icons.Rounded.MusicNote else Icons.Rounded.LibraryMusic, null, tint = Brand.Ivory, modifier = Modifier.size(24.dp))
+                Icon(when (song.source) { "midi" -> Icons.Rounded.MusicNote; "voice", "listen" -> Icons.Rounded.Mic; else -> Icons.Rounded.LibraryMusic }, null, tint = Brand.Ivory, modifier = Modifier.size(24.dp))
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(song.title, style = Type.Heading, color = Brand.Ivory, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${t(song.durationMs / 1000f)} · ${song.noteCount} notes · ${if (song.fromMidi) "MIDI" else "Transcribed"}",
+                Text("${t(song.durationMs / 1000f)} · ${song.noteCount} notes · ${song.sourceLabel}",
                     style = Type.Body, color = Brand.Mist)
             }
             Box(
@@ -209,5 +217,75 @@ private fun SongCard(song: Song, onLearn: () -> Unit, onDelete: () -> Unit) {
         }
         Spacer(Modifier.height(12.dp))
         PrimaryButton("Learn this song", Modifier.fillMaxWidth().height(42.dp), icon = Icons.Rounded.School, onClick = onLearn)
+    }
+}
+
+/** Everything the Listen panel needs from the activity. */
+class ListenControls(
+    val open: Boolean,
+    val voice: Boolean,
+    val mic: MicListener,
+    val onOpen: () -> Unit,
+    val onClose: () -> Unit,
+    val onMode: (Boolean) -> Unit,
+    val onRecord: () -> Unit,
+    val onDone: () -> Unit,
+)
+
+@Composable
+private fun ListenPanel(c: ListenControls) {
+    val rec = c.mic.recording
+    Row(Modifier.fillMaxWidth().well(RoundedCornerShape(20.dp)).padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Segmented(listOf("Play a song", "Sing or hum"), if (c.voice) 1 else 0, { if (!rec) c.onMode(it == 1) }, Modifier.width(300.dp))
+            Spacer(Modifier.height(12.dp))
+            Text(
+                if (c.voice) "Sing or hum the tune — “da da da”, “tang tang tang”. Clear, separate notes work best."
+                else "Play the song from YouTube, Spotify or any speaker near the phone. Louder music and a quiet room give the best keys.",
+                style = Type.Heading, color = Brand.Ivory,
+            )
+            Text(
+                if (c.voice) "Break turns your voice into piano notes you can learn and play."
+                else "Break listens through the microphone for as long as the song plays (up to 10 minutes).",
+                style = Type.Body, color = Brand.Mist, modifier = Modifier.padding(top = 4.dp),
+            )
+            Spacer(Modifier.height(14.dp))
+            LevelMeter(c.mic.levels, rec, Modifier.fillMaxWidth().height(46.dp))
+        }
+        Spacer(Modifier.width(22.dp))
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.size(84.dp).control(rec, CircleShape).pressScale({ if (rec) c.onDone() else c.onRecord() }, pressedScale = 0.92f),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (rec) Box(Modifier.size(26.dp).clip(RoundedCornerShape(6.dp)).background(Brand.Rec))
+                else Icon(Icons.Rounded.Mic, "Start listening", tint = Brand.Rec, modifier = Modifier.size(38.dp))
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(if (rec) t(c.mic.elapsedMs / 1000f) else "Tap to listen", style = Type.Mono, color = if (rec) Brand.Rec else Brand.Mist)
+            Text(if (rec) "Tap ■ when the song ends" else " ", style = Type.Caption, color = Brand.Dim)
+            Spacer(Modifier.height(6.dp))
+            GhostButton(if (rec) "Cancel" else "Close", Modifier.height(36.dp)) { c.onClose() }
+        }
+    }
+}
+
+@Composable
+private fun LevelMeter(levels: List<Float>, live: Boolean, modifier: Modifier) {
+    androidx.compose.foundation.Canvas(modifier) {
+        val n = 64
+        val gap = 2.dp.toPx()
+        val bw = (size.width - gap * (n - 1)) / n
+        val start = n - levels.size
+        for (i in 0 until n) {
+            val v = if (i >= start) levels[i - start] else 0f
+            val bh = (size.height * (0.06f + 0.94f * v)).coerceAtLeast(2.dp.toPx())
+            drawRoundRect(
+                if (live) Brand.Ivory.copy(alpha = 0.35f + 0.65f * v) else Brand.Line,
+                androidx.compose.ui.geometry.Offset(i * (bw + gap), (size.height - bh) / 2),
+                androidx.compose.ui.geometry.Size(bw, bh),
+                androidx.compose.ui.geometry.CornerRadius(bw / 2),
+            )
+        }
     }
 }

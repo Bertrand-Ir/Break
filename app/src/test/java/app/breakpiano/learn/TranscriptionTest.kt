@@ -63,4 +63,14 @@ class TranscriptionTest {
             assertTrue("rate $rate peak $peak", peak in 0.47f..0.53f)
         }
     }
+
+    /** A hummed tune with vibrato, scooped attacks and breath noise → clean single notes. */
+    @Test
+    fun hummedTuneBecomesCleanNotes() {
+        val (note, onset) = load("basic_pitch_hummed.bin")
+        val raw = NoteBuilder.outputToNotes(note, onset)
+        val sung = Arrange.build(Arrange.clean(raw, voice = true), Arrangement.Melody)
+        sung.forEach { println("hum %.2f-%.2f %d".format(it.start, it.end, it.pitch)) }
+        assertEquals(listOf(57, 59, 60, 62, 64, 64, 62), sung.map { it.pitch })
+    }
 }

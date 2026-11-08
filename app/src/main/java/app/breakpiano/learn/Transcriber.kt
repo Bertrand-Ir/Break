@@ -47,6 +47,7 @@ class Transcriber(private val context: Context) {
      */
     fun transcribe(pcm: File, rate: Int, onProgress: (Float) -> Unit): List<SongNote> {
         val mono = readMono(pcm)
+        normalize(mono)
         onProgress(0.05f)
         val audio = resample(mono, rate, SR)
         onProgress(0.15f)
@@ -58,6 +59,15 @@ class Transcriber(private val context: Context) {
     }
 
     // ── audio prep ───────────────────────────────────────────────────────────
+
+    /** Peak-normalise (helps quiet microphone recordings; a no-op for mastered tracks). */
+    private fun normalize(x: FloatArray) {
+        var peak = 0f
+        for (v in x) { val a = kotlin.math.abs(v); if (a > peak) peak = a }
+        if (peak < 1e-4f || peak > 0.85f) return
+        val g = (0.9f / peak).coerceAtMost(30f)
+        for (i in x.indices) x[i] *= g
+    }
 
     private fun readMono(file: File): FloatArray {
         val frames = (file.length() / 4).toInt()

@@ -19,6 +19,8 @@ import app.breakpiano.audio.BeatLibrary
 import app.breakpiano.audio.NativeEngine
 import app.breakpiano.audio.Previewer
 import app.breakpiano.learn.Learner
+import app.breakpiano.learn.MicListener
+import app.breakpiano.ui.learn.ListenControls
 import app.breakpiano.learn.SongLibrary
 import app.breakpiano.audio.Recorder
 import app.breakpiano.audio.Take
@@ -42,6 +44,13 @@ class MainActivity : ComponentActivity() {
     private lateinit var songLibrary: SongLibrary
     private lateinit var learner: Learner
     private var importStage by mutableStateOf<Pair<String, Float>?>(null)
+    private lateinit var mic: MicListener
+    private var listenOpen by mutableStateOf(false)
+    private var listenVoice by mutableStateOf(false)
+    private var listenCancelled = false
+    private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) listenOpen = true else state.toast = "Break needs the microphone to listen"
+    }
     private val model = KeyboardModel()
 
     private var ready by mutableStateOf(false)
@@ -74,6 +83,7 @@ class MainActivity : ComponentActivity() {
         previewer = Previewer(lifecycleScope)
         songLibrary = SongLibrary(this)
         learner = Learner(songLibrary, state, lifecycleScope)
+        mic = MicListener(this)
         model.listener = { note, down -> learner.onKey(note, down) }
 
         lifecycleScope.launch {
@@ -103,6 +113,16 @@ class MainActivity : ComponentActivity() {
                     onImportSongMidi = { pickSongMidi.launch(arrayOf("audio/midi", "audio/x-midi", "audio/mid", "application/x-midi", "audio/sp-midi")) },
                     onLearnSong = { s -> state.panel = app.breakpiano.data.Panel.None; learner.open(s) },
                     onDeleteSong = { s -> if (learner.song?.id == s.id) learner.close(); songLibrary.delete(s) },
+                    listen = ListenControls(
+                        open = listenOpen,
+                        voice = listenVoice,
+                        mic = mic,
+                        onOpen = ::openListen,
+                        onClose = { if (mic.recording) { listenCancelled = true; mic.stop() }; listenOpen = false },
+                        onMode = { listenVoice = it },
+                        onRecord = ::startListening,
+                        onDone = { mic.stop() },
+                    ),
                     ready = ready,
                     importProgress = importProgress,
                     onImport = { pickAudio.launch(arrayOf("audio/*")) },
@@ -140,6 +160,7 @@ class MainActivity : ComponentActivity() {
         recorder.stopPlayback()
         previewer.stop()
         learner.pause()
+        if (mic.recording) mic.stop()   // whatever was heard so far still gets turned into keys
         model.releaseAll()
         if (loaded) NativeEngine.stop()
         state.onEngineStopped()
@@ -203,6 +224,37 @@ class MainActivity : ComponentActivity() {
             state.userTrackId = null
         }
         beats.delete(beat)
+    }
+
+    private fun openListen() {
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) listenOpen = true
+        else micPermission.launch(android.Manifest.permission.RECORD_AUDIO)
+    }
+
+    /** Records until the user taps stop, then transcribes the take into a learnable song. */
+    private fun startListening() = lifecycleScope.launch {
+        if (mic.recording) return@launch
+        listenCancelled = false
+        // keep Break's own beat / clicks out of the recording
+        if (state.beatPlaying) state.stopBeat()
+        if (state.metronomeOn) state.toggleMetronome()
+        if (state.userTrackPlaying) state.playUserTrack(false)
+        learner.pause()
+        val voice = listenVoice
+        val (id, file) = songLibrary.newRecording()
+        try {
+            val take = mic.record(file, forMusic = !voice)
+            if (listenCancelled) { file.delete(); return@launch }
+            listenOpen = false
+            importStage = "Listening for notes…" to 0f
+            val song = songLibrary.importRecording(id, take, voice) { label, p -> runOnUiThread { importStage = label to p } }
+            state.toast = "Got it — ${song.noteCount} notes. Tap “Learn this song”."
+        } catch (t: Throwable) {
+            file.delete()
+            state.toast = t.message?.takeIf { it.length < 100 } ?: "Couldn't listen — please try again"
+        } finally {
+            importStage = null
+        }
     }
 
     private fun importSong(uri: Uri, midi: Boolean) = lifecycleScope.launch {
