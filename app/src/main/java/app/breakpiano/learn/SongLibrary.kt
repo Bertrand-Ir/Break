@@ -36,7 +36,7 @@ data class Song(
 
 /** Songs you learn: transcribed from audio (keeps the audio for play-along) or imported MIDI. */
 class SongLibrary(context: Context) {
-    companion object { const val CURRENT_NV = 3 }
+    companion object { const val CURRENT_NV = 4 }
     private val app = context.applicationContext
     private val dir = File(app.filesDir, "songs").apply { mkdirs() }
     private val index = File(dir, "index.json")

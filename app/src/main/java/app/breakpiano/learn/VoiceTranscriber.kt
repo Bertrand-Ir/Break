@@ -197,7 +197,10 @@ object VoiceTranscriber {
 
     // -- 4. note segmentation ------------------------------------------------
 
-    private class Cand(val start: Float, val end: Float, val raw: Float, val vel: Float)
+    private class Cand(val start: Float, val end: Float, val raw: Float, val vel: Float, val conf: Float = 1f, val peakDb: Float = 0f) {
+        val dur get() = end - start
+        fun withSpan(s: Float, e: Float) = Cand(s, e, raw, vel, conf, peakDb)
+    }
 
     /**
      * Fine-grained (5 ms) syllable starts: a short dip in loudness, or the hiss of a consonant
@@ -268,7 +271,7 @@ object VoiceTranscriber {
             splitRun(fr, pc, isOnset, i, j, dt, cands)
             i = j + 1
         }
-        val clean = snapToKey(cands.filter { it.end - it.start >= 0.08f }.sortedBy { it.start }).toMutableList()
+        val clean = snapToKey(purify(cands.filter { it.end - it.start >= 0.08f }.sortedBy { it.start })).toMutableList()
         // a glide between two connected notes passes briefly through the pitches in between: drop those
         var k = 1
         while (k < clean.size - 1) {
@@ -336,9 +339,13 @@ object VoiceTranscriber {
             val p = steadyPitch(fr, pc, s0, s1)
             if (p <= 0f) continue
             var peak = -120f
-            for (q in s0..s1) peak = max(peak, fr[q].db)
+            var confSum = 0f; var confN = 0
+            for (q in s0..s1) {
+                peak = max(peak, fr[q].db)
+                if (fr[q].voiced) { confSum += fr[q].conf; confN++ }
+            }
             val vel = ((peak + 40f) / 34f).coerceIn(0.35f, 1f)
-            out += Cand(fr[s0].t - (WIN / 2f) / SR + 0.01f, fr[s1].t + dt, p, vel)
+            out += Cand(fr[s0].t - (WIN / 2f) / SR + 0.01f, fr[s1].t + dt, p, vel, if (confN > 0) confSum / confN else 0f, peak)
         }
     }
 
@@ -356,6 +363,50 @@ object VoiceTranscriber {
         if (v.isEmpty()) return 0f
         v.sort()
         return v[v.size / 2]
+    }
+
+    // -- 5. purity: keep only what was really sung -----------------------------
+
+    /**
+     * Removes everything that isn't part of the melody you sang:
+     *  - breathy / noisy sounds (sniffs, breaths): a sung vowel is a clean, steady tone;
+     *  - faint background blips, much quieter than your singing;
+     *  - crumbs far shorter than your notes (clicks, glitches);
+     *  - short isolated jumps far from the tune (beeps, squeaks);
+     *  - short tails and fall-offs stuck to a real note (merged back into it).
+     */
+    private fun purify(c: List<Cand>): List<Cand> {
+        if (c.size < 3) return c.filter { it.conf >= 0.7f }
+        val medDur = c.map { it.dur }.sorted()[c.size / 2]
+        val loud = c.map { it.peakDb }.sorted()[(c.size * 0.75).toInt().coerceAtMost(c.lastIndex)]
+        val out = c.filter { it.conf >= 0.72f && it.peakDb >= loud - 15f && it.dur >= max(0.09f, medDur * 0.3f) }.toMutableList()
+
+        // isolated jumps: short and far from both neighbours
+        var i = 0
+        while (i < out.size) {
+            val n = out[i]
+            val prev = out.getOrNull(i - 1); val next = out.getOrNull(i + 1)
+            val farPrev = prev == null || abs(n.raw - prev.raw) > 7f
+            val farNext = next == null || abs(n.raw - next.raw) > 7f
+            if (n.dur < medDur * 0.6f && farPrev && farNext && (prev != null || next != null)) out.removeAt(i) else i++
+        }
+
+        // short fragments glued to a neighbour (note tails, scoops, transitions) fold into it
+        val shortLen = max(0.13f, medDur * 0.42f)
+        i = 0
+        while (i < out.size) {
+            val n = out[i]
+            if (n.dur >= shortLen) { i++; continue }
+            val prev = out.getOrNull(i - 1); val next = out.getOrNull(i + 1)
+            val gluedPrev = prev != null && n.start - prev.end < 0.05f && abs(n.raw - prev.raw) < 5f
+            val gluedNext = next != null && next.start - n.end < 0.05f && abs(n.raw - next.raw) < 5f
+            when {
+                gluedPrev && (!gluedNext || prev!!.dur >= next!!.dur) -> { out[i - 1] = prev!!.withSpan(prev.start, n.end); out.removeAt(i) }
+                gluedNext -> { out[i + 1] = next!!.withSpan(n.start, next.end); out.removeAt(i) }
+                else -> i++
+            }
+        }
+        return out
     }
 
     // -- 5. key awareness ----------------------------------------------------

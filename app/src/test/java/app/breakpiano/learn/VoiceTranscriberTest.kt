@@ -3,6 +3,7 @@ package app.breakpiano.learn
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.pow
 import kotlin.math.sin
@@ -28,6 +29,7 @@ class VoiceTranscriberTest {
         attack: Double = 0.02,
         release: Double = 0.04,
         consonantSec: Double = 0.012,
+        fallCents: Double = 0.0,           // each note's pitch falls away at the very end (a sung "tail")
     ): FloatArray {
         val rnd = Random(seed)
         val total = 0.3 + syllables.sumOf { (it.dur + it.gapAfter).toDouble() } + 0.3
@@ -47,6 +49,8 @@ class VoiceTranscriberTest {
                 val tt = i.toDouble() / sr
                 var cents = detuneCents + drift + s.cents - 60 * exp(-tt / 0.04)   // scoop into the note
                 if (tt > 0.15) cents += 25 * sin(2 * PI * 5.5 * (tt - 0.15))     // vibrato
+                val tail = s.dur - tt
+                if (fallCents != 0.0 && tail < 0.09) cents += fallCents * (1 - tail / 0.09)
                 val target = s.midi.toDouble()
                 val pitch = if (s.glideFrom != null && tt < 0.06) s.glideFrom + (target - s.glideFrom) * tt / 0.06 else target
                 val f0 = 440.0 * 2.0.pow((pitch - 69 + cents / 100) / 12)
@@ -58,7 +62,7 @@ class VoiceTranscriberTest {
                     val formant = 1.0 + 2.2 * exp(-((fh - 750) / 250).pow(2)) + 1.4 * exp(-((fh - 1250) / 300).pow(2))
                     v += sin(h * phase) * formant / h.toDouble().pow(1.2)
                 }
-                val env = minOf(1.0, tt / attack) * minOf(1.0, (s.dur - tt) / release)
+                val env = minOf(1.0, tt / attack) * minOf(1.0, (s.dur - tt) / release) * (if (fallCents != 0.0 && tail < 0.09) 0.6 + 0.4 * tail / 0.09 else 1.0)
                 out[start + i] += (v * env * amp * 0.25).toFloat()
             }
             t0 += s.dur + s.gapAfter
@@ -123,5 +127,50 @@ class VoiceTranscriberTest {
             72 to 0.0, 67 to 0.0, 64 to 0.0, 62 to 55.0, 60 to 0.0)
         val x = sing(sung.map { Syl(it.first, 0.34f, cents = it.second) }, seed = 19)
         assertEquals(sung.map { it.first }, pitches(x))
+    }
+
+    // ── junk that is not part of the melody ──
+    private fun sniff(x: FloatArray, at: Double, level: Double, seed: Int) {
+        val rnd = Random(seed); val n = (0.16 * sr).toInt(); val s0 = (at * sr).toInt()
+        var y1 = 0.0; var y2 = 0.0
+        val w = 2 * PI * 1600.0 / sr; val r = 0.97                          // nasal resonance ~1.6 kHz
+        for (i in 0 until n) {
+            val env = sin(PI * i / n)
+            val v = rnd.nextDouble(-1.0, 1.0) + 2 * r * cos(w) * y1 - r * r * y2
+            y2 = y1; y1 = v
+            if (s0 + i in x.indices) x[s0 + i] += (v * 0.05 * level * env).toFloat()
+        }
+    }
+    private fun beep(x: FloatArray, at: Double, hz: Double, dur: Double, level: Double) {
+        val s0 = (at * sr).toInt(); val n = (dur * sr).toInt()
+        for (i in 0 until n) if (s0 + i in x.indices) x[s0 + i] += (sin(2 * PI * hz * i / sr) * level * minOf(1.0, minOf(i, n - i) / 200.0)).toFloat()
+    }
+    private fun click(x: FloatArray, at: Double, level: Double) {
+        val s0 = (at * sr).toInt()
+        for (i in 0 until 60) if (s0 + i in x.indices) x[s0 + i] += (level * exp(-i / 8.0) * (if (i % 2 == 0) 1 else -1)).toFloat()
+    }
+    private fun breath(x: FloatArray, at: Double, dur: Double, level: Double, seed: Int) {
+        val rnd = Random(seed); val s0 = (at * sr).toInt(); val n = (dur * sr).toInt()
+        for (i in 0 until n) if (s0 + i in x.indices) x[s0 + i] += (rnd.nextDouble(-1.0, 1.0) * level * sin(PI * i / n)).toFloat()
+    }
+
+    /** "tang tang" with sniffs, a notification beep, clicks and breaths around it: only the tune remains. */
+    @Test fun sniffsBeepsAndClicksAreIgnored() {
+        val tune = listOf(60, 62, 64, 60, 60, 62, 64, 60, 64, 65, 67)
+        val x = sing(tune.map { Syl(it, 0.34f, 0.16f) }, seed = 23)
+        sniff(x, 0.05, 0.3, 1)                 // before singing
+        sniff(x, 0.3 + 4 * 0.5 + 0.35, 0.3, 2) // in a gap
+        beep(x, 0.3 + 6 * 0.5 + 0.36, 1975.0, 0.07, 0.05)  // short high beep in a gap (B6)
+        click(x, 0.3 + 2 * 0.5 + 0.38, 0.4)
+        click(x, 0.3 + 8 * 0.5 + 0.37, 0.4)
+        breath(x, 0.3 + 3 * 0.5 + 0.35, 0.14, 0.03, 3)
+        assertEquals(tune, pitches(x))
+    }
+
+    /** Every note ends by sliding down (a natural sung tail): no extra little notes. */
+    @Test fun noteTailsDoNotBecomeNotes() {
+        val tune = listOf(67, 65, 64, 62, 60, 62, 64)
+        val x = sing(tune.map { Syl(it, 0.4f, 0.05f) }, fallCents = -350.0, seed = 29)
+        assertEquals(tune, pitches(x))
     }
 }
