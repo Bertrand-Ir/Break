@@ -1,0 +1,21 @@
+# Build
+.gradle/
+build/
+app/build/
+app/.cxx/
+captures/
+*.apk
+*.aab
+
+# IDE
+.idea/
+*.iml
+.vscode/
+local.properties
+
+# Signing — NEVER commit these
+keystore/
+*.jks
+*.keystore
+keystore.properties
+.kotlin/
