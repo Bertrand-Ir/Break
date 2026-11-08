@@ -28,6 +28,8 @@ data class Song(
     val source: String = if (fromMidi) "midi" else "file",
     /** Note-detection version; sung songs at 2+ use the dedicated voice tracker. */
     val notesVersion: Int = 1,
+    /** Clean-up level for sung songs: 0 Gentle, 1 Balanced, 2 Strict. */
+    val cleanLevel: Int = 1,
 ) {
     val hasAudio get() = frames > 0
     val isVoice get() = source == "voice"
@@ -36,7 +38,7 @@ data class Song(
 
 /** Songs you learn: transcribed from audio (keeps the audio for play-along) or imported MIDI. */
 class SongLibrary(context: Context) {
-    companion object { const val CURRENT_NV = 4 }
+    companion object { const val CURRENT_NV = 5 }
     private val app = context.applicationContext
     private val dir = File(app.filesDir, "songs").apply { mkdirs() }
     private val index = File(dir, "index.json")
@@ -50,7 +52,7 @@ class SongLibrary(context: Context) {
                     val o = arr.getJSONObject(i)
                     val s = Song(o.getString("id"), o.getString("title"), o.getLong("dur"), o.getInt("notes"),
                         o.optBoolean("midi"), o.optInt("rate"), o.optInt("frames"),
-                        o.optString("source", if (o.optBoolean("midi")) "midi" else "file"), o.optInt("nv", 1))
+                        o.optString("source", if (o.optBoolean("midi")) "midi" else "file"), o.optInt("nv", 1), o.optInt("cl", 1))
                     if (notesFile(s.id).exists()) songs += s
                 }
             }
@@ -64,7 +66,7 @@ class SongLibrary(context: Context) {
         val arr = JSONArray()
         songs.forEach { s ->
             arr.put(JSONObject().put("id", s.id).put("title", s.title).put("dur", s.durationMs).put("notes", s.noteCount)
-                .put("midi", s.fromMidi).put("rate", s.sampleRate).put("frames", s.frames).put("source", s.source).put("nv", s.notesVersion))
+                .put("midi", s.fromMidi).put("rate", s.sampleRate).put("frames", s.frames).put("source", s.source).put("nv", s.notesVersion).put("cl", s.cleanLevel))
         }
         index.writeText(arr.toString())
     }
@@ -129,10 +131,10 @@ class SongLibrary(context: Context) {
         }
 
     /** Picks the right detector for where the audio came from. */
-    private fun detect(pcm: File, rate: Int, source: String, onStage: (String, Float) -> Unit): List<SongNote> =
+    private fun detect(pcm: File, rate: Int, source: String, onStage: (String, Float) -> Unit, clean: Int = 1): List<SongNote> =
         if (source == "voice") {
             onStage("Following your voice…", 0.3f)
-            VoiceTranscriber.transcribe(pcm, rate).also { onStage("Writing the keys…", 1f) }
+            VoiceTranscriber.transcribe(pcm, rate, clean).also { onStage("Writing the keys…", 1f) }
         } else {
             Transcriber(app).transcribe(pcm, rate, micTake = source == "listen") { p ->
                 onStage(if (p < 0.15f) "Preparing audio…" else if (p < 0.9f) "Listening for notes…" else "Writing the keys…", p)
@@ -140,12 +142,12 @@ class SongLibrary(context: Context) {
         }
 
     /** Runs note detection again on a song's saved recording (e.g. after detection improves). */
-    suspend fun redetect(song: Song, onStage: (String, Float) -> Unit = { _, _ -> }): Song = withContext(Dispatchers.Default) {
+    suspend fun redetect(song: Song, clean: Int = song.cleanLevel, onStage: (String, Float) -> Unit = { _, _ -> }): Song = withContext(Dispatchers.Default) {
         require(song.hasAudio) { "This song has no recording to listen to again." }
-        val notes = detect(pcmFile(song.id), song.sampleRate, song.source, onStage)
+        val notes = detect(pcmFile(song.id), song.sampleRate, song.source, onStage, clean)
         require(notes.isNotEmpty()) { "Couldn't hear clear notes in that recording." }
         writeNotes(song.id, notes)
-        val updated = song.copy(noteCount = notes.size, notesVersion = CURRENT_NV)
+        val updated = song.copy(noteCount = notes.size, notesVersion = CURRENT_NV, cleanLevel = clean)
         withContext(Dispatchers.Main) {
             val i = songs.indexOfFirst { it.id == song.id }
             if (i >= 0) { songs[i] = updated; save() }

@@ -72,15 +72,28 @@ object VoiceTranscriber {
     private const val MAX_HZ = 1050.0           // C6
     private const val YIN_THRESH = 0.15
 
-    fun transcribe(file: File, rate: Int): List<SongNote> = transcribe(readPcmMono(file), rate)
+    /** How hard to clean: 0 Gentle (keeps quick ornaments), 1 Balanced, 2 Strict (only clear sung notes). */
+    private class Level(val denoise: Float, val conf: Float, val quietDb: Float, val wobble: Float)
+    private val LEVELS = arrayOf(
+        Level(denoise = 1.2f, conf = 0.68f, quietDb = 18f, wobble = 0.75f),
+        Level(denoise = 1.6f, conf = 0.72f, quietDb = 15f, wobble = 0.6f),
+        Level(denoise = 2.1f, conf = 0.78f, quietDb = 12f, wobble = 0.45f),
+    )
+    private var level = LEVELS[1]
+    /** Test hook: receives one line per note candidate. */
+    internal var debug: ((String) -> Unit)? = null
 
-    fun transcribe(input: FloatArray, rate: Int): List<SongNote> {
+    fun transcribe(file: File, rate: Int, clean: Int = 1): List<SongNote> = transcribe(readPcmMono(file), rate, clean)
+
+    @Synchronized
+    fun transcribe(input: FloatArray, rate: Int, clean: Int = 1): List<SongNote> {
+        level = LEVELS[clean.coerceIn(0, 2)]
         val x = input.copyOf()
         var peak = 0f
         for (v in x) peak = max(peak, abs(v))
         if (peak > 1e-4f) { val g = 0.9f / peak; for (i in x.indices) x[i] *= g }   // level-independent
         highPass(x, rate, 70.0)
-        val y = resample(x, rate, SR)                 // band-limits to ~5 kHz on the way down
+        val y = Denoise.apply(resample(x, rate, SR), level.denoise)   // band-limit, then strip the room's steady noise
         val frames = analyse(y)
         if (frames.isEmpty()) return emptyList()
         fixOctaves(frames)
@@ -140,11 +153,17 @@ object VoiceTranscriber {
         }
         // level gate from the noise floor (quietest 15 %) and the loudest parts
         val sorted = raws.map { it.db }.sorted()
-        val floorDb = sorted[(sorted.size * 0.15).toInt().coerceIn(0, sorted.lastIndex)]
         val peakDb = sorted[(sorted.size * 0.98).toInt().coerceIn(0, sorted.lastIndex)]
-        val gate = max(floorDb + 10f, peakDb - 38f)
+        // the room's noise floor, measured only on noisy (non-tonal) moments: in an echoey room the
+        // pauses are filled with the tonal echo of your own voice, which must not raise the bar
+        val noisy = raws.filter { it.ap > 0.35 }.map { it.db }.sorted()
+        val floorDb = if (noisy.size >= raws.size / 20) noisy[(noisy.size * 0.1).toInt().coerceIn(0, noisy.lastIndex)]
+        else sorted[(sorted.size * 0.1).toInt().coerceIn(0, sorted.lastIndex)]
+        // never demand more than "within 12 dB of your loudest singing"
+        val gate = min(max(floorDb + 8f, peakDb - 40f), peakDb - 12f)
         return raws.map {
-            val voiced = it.db > gate && it.ap < 0.3 && it.hz in MIN_HZ..MAX_HZ
+            // a clean tone — or a clearly loud one whose clarity is muddied by its own echo / a second sound
+            val voiced = it.db > gate && it.hz in MIN_HZ..MAX_HZ && (it.ap < 0.3 || (it.ap < 0.5 && it.db > gate + 8f))
             FrameM(it.t, it.db, if (voiced) (69 + 12 * ln(it.hz / 440.0) / ln(2.0)).toFloat() else 0f, voiced, (1 - it.ap).toFloat().coerceIn(0f, 1f))
         }.toMutableList()
     }
@@ -197,9 +216,13 @@ object VoiceTranscriber {
 
     // -- 4. note segmentation ------------------------------------------------
 
-    private class Cand(val start: Float, val end: Float, val raw: Float, val vel: Float, val conf: Float = 1f, val peakDb: Float = 0f) {
+    private class Cand(
+        val start: Float, val end: Float, val raw: Float, val vel: Float,
+        val conf: Float = 1f, val peakDb: Float = 0f, val wobble: Float = 0f,
+    ) {
         val dur get() = end - start
-        fun withSpan(s: Float, e: Float) = Cand(s, e, raw, vel, conf, peakDb)
+        fun withSpan(s: Float, e: Float) = Cand(s, e, raw, vel, conf, peakDb, wobble)
+        fun withRaw(r: Float) = Cand(start, end, r, vel, conf, peakDb, wobble)
     }
 
     /**
@@ -271,6 +294,7 @@ object VoiceTranscriber {
             splitRun(fr, pc, isOnset, i, j, dt, cands)
             i = j + 1
         }
+        debug?.let { d -> cands.sortedBy { it.start }.forEach { c -> d("cand %.2f-%.2f raw=%.2f conf=%.2f peak=%.1f wob=%.2f".format(c.start, c.end, c.raw, c.conf, c.peakDb, c.wobble)) } }
         val clean = snapToKey(purify(cands.filter { it.end - it.start >= 0.08f }.sortedBy { it.start })).toMutableList()
         // a glide between two connected notes passes briefly through the pitches in between: drop those
         var k = 1
@@ -313,7 +337,7 @@ object VoiceTranscriber {
                 for (q in k until k + 6) { if (!fr[q].voiced || abs(medPitch(q) - cur) < 0.75f) { all = false; break } }
                 pitchChange = all
             }
-            val syllable = isOnset[k] && k - segStart > 7 && b - k > 6
+            val syllable = isOnset[k] && k - segStart > 9 && b - k > 9      // a real note on both sides of the cut
             if (syllable && !attack && !pitchChange) {
                 cuts += k; segStart = k
                 k = segStart + 5
@@ -333,20 +357,48 @@ object VoiceTranscriber {
             k++
         }
         cuts += b + 1
+        // slivers (< 80 ms, e.g. chopped up by room echo) rejoin a neighbour instead of being lost
+        var changed = true
+        while (changed && cuts.size > 2) {
+            changed = false
+            for (q in 0 until cuts.size - 1) {
+                if (cuts[q + 1] - cuts[q] < 8) {
+                    if (q > 0) cuts.removeAt(q) else if (cuts.size > 2) cuts.removeAt(1) else break
+                    changed = true; break
+                }
+            }
+        }
         for (s in 0 until cuts.size - 1) {
             val s0 = cuts[s]; val s1 = cuts[s + 1] - 1
             if (s1 - s0 < 6) continue
             val p = steadyPitch(fr, pc, s0, s1)
             if (p <= 0f) continue
             var peak = -120f
-            var confSum = 0f; var confN = 0
+            val confs = ArrayList<Float>()
             for (q in s0..s1) {
                 peak = max(peak, fr[q].db)
-                if (fr[q].voiced) { confSum += fr[q].conf; confN++ }
+                if (fr[q].voiced) confs += fr[q].conf
             }
+            confs.sort()
+            // clarity = how clean its clearest moments are (an echo overlap shouldn't sink a real note)
+            val clarity = if (confs.isEmpty()) 0f else confs[(confs.size * 0.75f).toInt().coerceAtMost(confs.lastIndex)]
             val vel = ((peak + 40f) / 34f).coerceIn(0.35f, 1f)
-            out += Cand(fr[s0].t - (WIN / 2f) / SR + 0.01f, fr[s1].t + dt, p, vel, if (confN > 0) confSum / confN else 0f, peak)
+            out += Cand(fr[s0].t - (WIN / 2f) / SR + 0.01f, fr[s1].t + dt, p, vel, clarity, peak,
+                wobble(fr, pc, s0, s1))
         }
+    }
+
+    /**
+     * How much the pitch wanders inside a note (semitones, robust spread of the middle part).
+     * A sung note holds its pitch; speech, background voices and noises wander.
+     */
+    private fun wobble(fr: List<FrameM>, pc: FloatArray, a: Int, b: Int): Float {
+        val len = b - a + 1
+        val v = ArrayList<Float>()
+        for (q in a + (len * 0.25f).toInt()..b - (len * 0.15f).toInt()) if (q in a..b && fr[q].voiced) v += pc[q]
+        if (v.size < 4) return 0f
+        v.sort()
+        return (v[(v.size * 0.85f).toInt().coerceAtMost(v.lastIndex)] - v[(v.size * 0.15f).toInt()]) / 2f
     }
 
     /** The pitch aimed for: median of the steady, confident frames in the body of the note. */
@@ -376,10 +428,28 @@ object VoiceTranscriber {
      *  - short tails and fall-offs stuck to a real note (merged back into it).
      */
     private fun purify(c: List<Cand>): List<Cand> {
-        if (c.size < 3) return c.filter { it.conf >= 0.7f }
+        if (c.size < 3) return c.filter { it.conf >= level.conf && it.wobble <= level.wobble }
         val medDur = c.map { it.dur }.sorted()[c.size / 2]
         val loud = c.map { it.peakDb }.sorted()[(c.size * 0.75).toInt().coerceAtMost(c.lastIndex)]
-        val out = c.filter { it.conf >= 0.72f && it.peakDb >= loud - 15f && it.dur >= max(0.09f, medDur * 0.3f) }.toMutableList()
+        val out = c.filter {
+            it.conf >= level.conf && it.peakDb >= loud - level.quietDb && it.dur >= max(0.09f, medDur * 0.3f) &&
+                it.wobble <= level.wobble * (if (it.dur > medDur * 1.5f) 1.4f else 1f)      // long held notes may waver more
+        }.toMutableList()
+
+        // octave slips: a note an octave away from both neighbours, which agree with each other
+        for (i in 1 until out.size - 1) {
+            val p = out[i - 1].raw; val n = out[i].raw; val q = out[i + 1].raw
+            if (abs(p - q) < 5f) for (oct in floatArrayOf(-12f, 12f)) {
+                if (abs(n + oct - p) < 4f && abs(n + oct - q) < 4f && abs(n - p) > 8f) { out[i] = out[i].withRaw(n + oct); break }
+            }
+        }
+
+        // range: notes far outside where this voice was singing
+        if (out.size >= 5) {
+            val sorted = out.map { it.raw }.sorted()
+            val lo = sorted[(sorted.size * 0.1f).toInt()]; val hi = sorted[(sorted.size * 0.9f).toInt().coerceAtMost(sorted.lastIndex)]
+            out.removeAll { (it.raw < lo - 7f || it.raw > hi + 7f) && it.dur < medDur * 1.5f }
+        }
 
         // isolated jumps: short and far from both neighbours
         var i = 0

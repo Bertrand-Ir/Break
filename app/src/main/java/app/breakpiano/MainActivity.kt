@@ -231,11 +231,11 @@ class MainActivity : ComponentActivity() {
         beats.delete(beat)
     }
 
-    private fun redetectSong(song: app.breakpiano.learn.Song) = lifecycleScope.launch {
+    private fun redetectSong(song: app.breakpiano.learn.Song, level: Int) = lifecycleScope.launch {
         if (redetecting != null) return@launch
         redetecting = song.id
         try {
-            val updated = songLibrary.redetect(song)
+            val updated = songLibrary.redetect(song, level)
             if (learner.song?.id == song.id) learner.open(updated)
             state.toast = "Notes detected again — ${updated.noteCount} notes"
         } catch (t: Throwable) {

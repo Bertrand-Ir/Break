@@ -101,7 +101,7 @@ fun MainScreen(
     onDeleteSong: (Song) -> Unit,
     listen: ListenControls,
     onRenameSong: (Song, String) -> Unit,
-    onRedetectSong: (Song) -> Unit,
+    onRedetectSong: (Song, Int) -> Unit,
     redetecting: String?,
     ready: Boolean,
     importProgress: Float?,

@@ -173,4 +173,71 @@ class VoiceTranscriberTest {
         val x = sing(tune.map { Syl(it, 0.4f, 0.05f) }, fallCents = -350.0, seed = 29)
         assertEquals(tune, pitches(x))
     }
+
+    // ── noisy rooms ──
+    private fun fan(x: FloatArray, level: Double, seed: Int) {
+        val rnd = Random(seed); var lp = 0.0
+        for (i in x.indices) { lp = 0.92 * lp + 0.08 * rnd.nextDouble(-1.0, 1.0); x[i] += ((lp * 3 + rnd.nextDouble(-1.0, 1.0) * 0.3) * level).toFloat() }
+    }
+    private fun hum(x: FloatArray, level: Double) {
+        for (i in x.indices) { val t = i.toDouble() / sr; x[i] += (level * (sin(2 * PI * 100 * t) + 0.5 * sin(2 * PI * 200 * t) + 0.3 * sin(2 * PI * 300 * t))).toFloat() }
+    }
+    /** Someone talking in the background: a wandering, syllabic voice through the whole take. */
+    private fun talker(x: FloatArray, level: Double, seed: Int) {
+        val rnd = Random(seed); var f = 150.0; var ph = 0.0; var target = 150.0
+        for (i in x.indices) {
+            if (i % 2205 == 0) target = rnd.nextDouble(100.0, 220.0)
+            f += (target - f) * 0.0006
+            ph += 2 * PI * f / sr
+            val t = i.toDouble() / sr
+            val syl = maxOf(0.0, sin(2 * PI * 4.3 * t)).pow(1.5)
+            var v = 0.0
+            for (h in 1..10) v += sin(h * ph) / h
+            x[i] += (v * syl * level).toFloat()
+        }
+    }
+    private fun reverb(x: FloatArray): FloatArray {
+        val y = x.copyOf()
+        val d1 = (0.047 * sr).toInt(); val d2 = (0.071 * sr).toInt(); val d3 = (0.113 * sr).toInt()
+        for (i in y.indices) {
+            var v = y[i].toDouble()
+            if (i >= d1) v += 0.45 * y[i - d1]
+            if (i >= d2) v += 0.35 * y[i - d2]
+            if (i >= d3) v += 0.25 * y[i - d3]
+            y[i] = (v * 0.7).toFloat()
+        }
+        return y
+    }
+
+    private val ode = listOf(64, 64, 65, 67, 67, 65, 64, 62, 60, 60, 62, 64, 64, 62, 62)   // "Ode to Joy"
+
+    @Test fun loudFanInTheRoom() {
+        val x = sing(ode.map { Syl(it, 0.32f, 0.08f) }, seed = 31)
+        fan(x, 0.035, 4)
+        assertEquals(ode, pitches(x))
+    }
+
+    @Test fun electricalHum() {
+        val x = sing(ode.map { Syl(it, 0.32f, 0.08f) }, seed = 37)
+        hum(x, 0.02)
+        assertEquals(ode, pitches(x))
+    }
+
+    @Test fun someoneTalkingInTheBackground() {
+        val x = sing(ode.map { Syl(it, 0.32f, 0.12f) }, seed = 41)
+        talker(x, 0.025, 6)
+        assertEquals(ode, pitches(x))
+    }
+
+    @Test fun echoeyRoom() {
+        val x = reverb(sing(ode.map { Syl(it, 0.32f, 0.1f) }, seed = 43))
+        assertEquals(ode, pitches(x))
+    }
+
+    @Test fun everythingAtOnce() {
+        val x = reverb(sing(ode.map { Syl(it, 0.32f, 0.12f) }, detuneCents = 25.0, seed = 47))
+        fan(x, 0.02, 8); hum(x, 0.01); talker(x, 0.015, 9)
+        sniff(x, 0.3 + 3 * 0.44 + 0.33, 0.3, 5); click(x, 0.3 + 9 * 0.44 + 0.34, 0.3)
+        assertEquals(ode, pitches(x))
+    }
 }

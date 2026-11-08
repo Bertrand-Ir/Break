@@ -138,7 +138,7 @@ fun SongsModal(
     onDelete: (Song) -> Unit,
     listen: ListenControls,
     onRename: (Song, String) -> Unit,
-    onRedetect: (Song) -> Unit,
+    onRedetect: (Song, Int) -> Unit,
     redetecting: String?,
 ) {
     var editing by remember { mutableStateOf<Song?>(null) }
@@ -208,7 +208,7 @@ fun SongsModal(
             song = live,
             busy = redetecting == live.id,
             onSave = { name -> onRename(live, name); editing = null },
-            onRedetect = { onRedetect(live) },
+            onRedetect = { level -> onRedetect(live, level) },
             onDelete = { deleting = live },
             onDismiss = { editing = null },
         )
@@ -318,7 +318,8 @@ private fun LevelMeter(levels: List<Float>, live: Boolean, modifier: Modifier) {
 
 /** Rename a song (and re-run note detection on its recording). Sits high so the keyboard can't cover it. */
 @Composable
-private fun EditSongDialog(song: Song, busy: Boolean, onSave: (String) -> Unit, onRedetect: () -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit) {
+private fun EditSongDialog(song: Song, busy: Boolean, onSave: (String) -> Unit, onRedetect: (Int) -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit) {
+    var level by remember(song.id) { mutableStateOf(song.cleanLevel) }
     var name by remember(song.id) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(song.title, androidx.compose.ui.text.TextRange(0, song.title.length))) }
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(song.id) { focus.requestFocus() }
@@ -352,10 +353,24 @@ private fun EditSongDialog(song: Song, busy: Boolean, onSave: (String) -> Unit, 
                 modifier = Modifier.fillMaxWidth().well(RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 12.dp)
                     .focusRequester(focus),
             )
+            if (song.isVoice) {
+                Spacer(Modifier.height(14.dp))
+                Text("CLEAN-UP", style = Type.Caption, color = Brand.Dim)
+                Spacer(Modifier.height(6.dp))
+                Segmented(listOf("Gentle", "Balanced", "Strict"), level, { level = it }, Modifier.fillMaxWidth())
+                Text(
+                    when (level) {
+                        0 -> "Keeps quick little notes — for fast or decorated singing."
+                        2 -> "Only clear, steady sung notes — removes every stray sound."
+                        else -> "Removes sniffs, breaths, beeps and background — keeps your melody."
+                    },
+                    style = Type.Body, color = Brand.Mist, modifier = Modifier.padding(top = 6.dp),
+                )
+            }
             Spacer(Modifier.height(16.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (song.hasAudio) {
-                    GhostButton(if (busy) "Detecting…" else "Detect again", Modifier.height(42.dp), icon = Icons.Rounded.Replay) { if (!busy) onRedetect() }
+                    GhostButton(if (busy) "Detecting…" else "Detect again", Modifier.height(42.dp), icon = Icons.Rounded.Replay) { if (!busy) onRedetect(level) }
                     Spacer(Modifier.width(8.dp))
                 }
                 GhostButton("Delete", Modifier.height(42.dp), icon = Icons.Rounded.DeleteOutline) { onDelete() }
