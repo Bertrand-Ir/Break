@@ -59,6 +59,12 @@ class Learner(private val library: SongLibrary, private val state: BreakState, p
     private val satisfied = HashSet<Int>()
     private var hitFlags = BooleanArray(0)
 
+    /** A sung tune is one line for one hand, whatever its range. */
+    private fun build(r: List<SongNote>, a: Arrangement): List<LearnNote> {
+        val b = Arrange.build(r, a)
+        return if (song?.isVoice == true) b.map { it.copy(hand = 0) } else b
+    }
+
     private fun isMine(n: LearnNote) = when (hands) { Hands.Both -> true; Hands.Right -> n.hand == 0; Hands.Left -> n.hand == 1 }
 
     // ── lifecycle ────────────────────────────────────────────────────────────
@@ -67,10 +73,16 @@ class Learner(private val library: SongLibrary, private val state: BreakState, p
         close()
         scope.launch {
             loading = true
-            raw = library.loadNotes(s).let { if (s.fromMidi) it else Arrange.clean(it, voice = s.isVoice) }
+            raw = library.loadNotes(s).let {
+                when {
+                    s.fromMidi -> it
+                    s.isVoice && s.notesVersion >= 2 -> it          // voice tracker output is already clean
+                    else -> Arrange.clean(it, voice = s.isVoice)
+                }
+            }
             song = s
-            arrangement = if (s.fromMidi) Arrangement.Full else Arrangement.Melody
-            notes = Arrange.build(raw, arrangement)
+            arrangement = if (s.fromMidi || s.isVoice) Arrangement.Full else Arrangement.Melody
+            notes = build(raw, arrangement)
             hitFlags = BooleanArray(notes.size)
             listen = Listen.Piano
             audioLoaded = false
@@ -99,7 +111,7 @@ class Learner(private val library: SongLibrary, private val state: BreakState, p
     fun changeArrangement(a: Arrangement) {
         if (a == arrangement) return
         arrangement = a
-        notes = Arrange.build(raw, a)
+        notes = build(raw, a)
         hitFlags = BooleanArray(notes.size)
         seek(position)
     }

@@ -26,6 +26,8 @@ data class Song(
     val frames: Int = 0,
     /** "file", "midi", "listen" (heard through the mic) or "voice" (sung / hummed). */
     val source: String = if (fromMidi) "midi" else "file",
+    /** Note-detection version; sung songs at 2+ use the dedicated voice tracker. */
+    val notesVersion: Int = 1,
 ) {
     val hasAudio get() = frames > 0
     val isVoice get() = source == "voice"
@@ -34,6 +36,7 @@ data class Song(
 
 /** Songs you learn: transcribed from audio (keeps the audio for play-along) or imported MIDI. */
 class SongLibrary(context: Context) {
+    companion object { const val CURRENT_NV = 2 }
     private val app = context.applicationContext
     private val dir = File(app.filesDir, "songs").apply { mkdirs() }
     private val index = File(dir, "index.json")
@@ -47,7 +50,7 @@ class SongLibrary(context: Context) {
                     val o = arr.getJSONObject(i)
                     val s = Song(o.getString("id"), o.getString("title"), o.getLong("dur"), o.getInt("notes"),
                         o.optBoolean("midi"), o.optInt("rate"), o.optInt("frames"),
-                        o.optString("source", if (o.optBoolean("midi")) "midi" else "file"))
+                        o.optString("source", if (o.optBoolean("midi")) "midi" else "file"), o.optInt("nv", 1))
                     if (notesFile(s.id).exists()) songs += s
                 }
             }
@@ -61,7 +64,7 @@ class SongLibrary(context: Context) {
         val arr = JSONArray()
         songs.forEach { s ->
             arr.put(JSONObject().put("id", s.id).put("title", s.title).put("dur", s.durationMs).put("notes", s.noteCount)
-                .put("midi", s.fromMidi).put("rate", s.sampleRate).put("frames", s.frames).put("source", s.source))
+                .put("midi", s.fromMidi).put("rate", s.sampleRate).put("frames", s.frames).put("source", s.source).put("nv", s.notesVersion))
         }
         index.writeText(arr.toString())
     }
@@ -110,14 +113,13 @@ class SongLibrary(context: Context) {
         withContext(Dispatchers.Default) {
             try {
                 require(take.frames > take.sampleRate) { "That was too short — record at least a couple of seconds." }
-                val notes = Transcriber(app).transcribe(take.file, take.sampleRate) { p ->
-                    onStage(if (p < 0.15f) "Preparing audio…" else if (p < 0.9f) "Listening for notes…" else "Writing the keys…", p)
-                }
+                val notes = detect(take.file, take.sampleRate, if (voice) "voice" else "listen", onStage)
                 require(notes.isNotEmpty()) { if (voice) "Couldn't hear a clear tune — try humming a bit louder, closer to the phone." else "Couldn't hear clear notes — turn the music up or move closer." }
                 writeNotes(id, notes)
                 val stamp = java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
                 val song = Song(id, (if (voice) "Sung melody · " else "Listened · ") + stamp, take.frames * 1000L / take.sampleRate,
-                    notes.size, fromMidi = false, sampleRate = take.sampleRate, frames = take.frames, source = if (voice) "voice" else "listen")
+                    notes.size, fromMidi = false, sampleRate = take.sampleRate, frames = take.frames, source = if (voice) "voice" else "listen",
+                    notesVersion = CURRENT_NV)
                 withContext(Dispatchers.Main) { songs.add(0, song); save() }
                 song
             } catch (t: Throwable) {
@@ -125,6 +127,36 @@ class SongLibrary(context: Context) {
                 throw t
             }
         }
+
+    /** Picks the right detector for where the audio came from. */
+    private fun detect(pcm: File, rate: Int, source: String, onStage: (String, Float) -> Unit): List<SongNote> =
+        if (source == "voice") {
+            onStage("Following your voice…", 0.3f)
+            VoiceTranscriber.transcribe(pcm, rate).also { onStage("Writing the keys…", 1f) }
+        } else {
+            Transcriber(app).transcribe(pcm, rate, micTake = source == "listen") { p ->
+                onStage(if (p < 0.15f) "Preparing audio…" else if (p < 0.9f) "Listening for notes…" else "Writing the keys…", p)
+            }
+        }
+
+    /** Runs note detection again on a song's saved recording (e.g. after detection improves). */
+    suspend fun redetect(song: Song, onStage: (String, Float) -> Unit = { _, _ -> }): Song = withContext(Dispatchers.Default) {
+        require(song.hasAudio) { "This song has no recording to listen to again." }
+        val notes = detect(pcmFile(song.id), song.sampleRate, song.source, onStage)
+        require(notes.isNotEmpty()) { "Couldn't hear clear notes in that recording." }
+        writeNotes(song.id, notes)
+        val updated = song.copy(noteCount = notes.size, notesVersion = CURRENT_NV)
+        withContext(Dispatchers.Main) {
+            val i = songs.indexOfFirst { it.id == song.id }
+            if (i >= 0) { songs[i] = updated; save() }
+        }
+        updated
+    }
+
+    /** Older sung songs were detected with the general model — redo them with the voice tracker. */
+    suspend fun upgradeVoiceSongs() {
+        for (s in songs.toList()) if (s.isVoice && s.hasAudio && s.notesVersion < CURRENT_NV) runCatching { redetect(s) }
+    }
 
     fun rename(song: Song, title: String) {
         val i = songs.indexOfFirst { it.id == song.id }

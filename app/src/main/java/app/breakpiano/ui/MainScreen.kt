@@ -2,6 +2,27 @@ package app.breakpiano.ui
 
 import android.os.SystemClock
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.launch
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -79,6 +100,9 @@ fun MainScreen(
     onLearnSong: (Song) -> Unit,
     onDeleteSong: (Song) -> Unit,
     listen: ListenControls,
+    onRenameSong: (Song, String) -> Unit,
+    onRedetectSong: (Song) -> Unit,
+    redetecting: String?,
     ready: Boolean,
     importProgress: Float?,
     onImport: () -> Unit,
@@ -113,9 +137,21 @@ fun MainScreen(
     ) {
         val panelWidth = (maxWidth * 0.56f).coerceIn(340.dp, 420.dp)
 
+        // In learning mode the top bar tucks away above the screen; a pull tab brings it back down.
+        val learning = learner.active
+        val reveal = remember { Animatable(1f) }
+        LaunchedEffect(learning) { reveal.animateTo(if (learning) 0f else 1f, spring(dampingRatio = 0.86f, stiffness = 380f)) }
+        val barFull = if (state.dualKeyboard) TopBarOneRowHeight else TopBarTwoRowHeight
+
         Column(Modifier.fillMaxSize()) {
-            TopBar(state, recorder, userBeatName, updateBadge = updater.state is UpdateState.Available)
-            if (learner.active) LearnBar(learner, Modifier.padding(bottom = 6.dp))
+            Box(Modifier.fillMaxWidth().height(barFull * reveal.value).clipToBounds()) {
+                TopBar(
+                    state, recorder, userBeatName, updateBadge = updater.state is UpdateState.Available,
+                    modifier = Modifier.align(Alignment.BottomCenter).wrapContentHeight(Alignment.Bottom, unbounded = true),
+                )
+            }
+            if (learning) PullTab(reveal, barFull)
+            if (learning) LearnBar(learner, Modifier.padding(bottom = 6.dp))
             // Piano body: lacquered case around the action
             Box(
                 Modifier
@@ -147,7 +183,7 @@ fun MainScreen(
 
         // ── side panels (non-modal: visible keys stay playable) ──
         val sidePanel = state.panel.takeIf { it == Panel.Metronome || it == Panel.Recordings }
-        val barH = if (state.dualKeyboard) TopBarOneRowHeight else TopBarTwoRowHeight
+        val barH = barFull * reveal.value + if (learning) PullTabHeight else 0.dp
         AnimatedVisibility(
             visible = sidePanel != null,
             enter = slideInHorizontally(spring(dampingRatio = 0.86f, stiffness = 520f)) { it } + fadeIn(),
@@ -178,7 +214,7 @@ fun MainScreen(
             visible = state.panel == Panel.Learn,
             enter = fadeIn(tween(160)) + scaleIn(initialScale = 0.97f),
             exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.97f),
-        ) { SongsModal(state, songs, importStage, onImportSongAudio, onImportSongMidi, onLearnSong, onDeleteSong, listen) }
+        ) { SongsModal(state, songs, importStage, onImportSongAudio, onImportSongMidi, onLearnSong, onDeleteSong, listen, onRenameSong, onRedetectSong, redetecting) }
 
         AnimatedVisibility(
             visible = state.panel == Panel.Settings,
@@ -209,6 +245,44 @@ fun MainScreen(
         // ── first-launch loading veil ──
         AnimatedVisibility(visible = !ready, enter = fadeIn(), exit = fadeOut(tween(450))) {
             LoadingVeil()
+        }
+    }
+}
+
+private val PullTabHeight = 22.dp
+
+/** The little handle under a hidden top bar: drag it down (or tap) to bring the bar back, push it up to tuck it away. */
+@Composable
+private fun PullTab(reveal: Animatable<Float, AnimationVector1D>, barFull: Dp) {
+    val scope = rememberCoroutineScope()
+    val px = with(LocalDensity.current) { barFull.toPx() }
+    val springy = spring<Float>(dampingRatio = 0.86f, stiffness = 380f)
+    fun settle(velocity: Float) = scope.launch {
+        val open = if (kotlin.math.abs(velocity) > 500f) velocity > 0 else reveal.value > 0.4f
+        reveal.animateTo(if (open) 1f else 0f, springy, initialVelocity = velocity / px)
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(PullTabHeight)
+            .draggable(
+                state = rememberDraggableState { d -> scope.launch { reveal.snapTo((reveal.value + d / px).coerceIn(0f, 1f)) } },
+                orientation = Orientation.Vertical,
+                onDragStopped = { v -> settle(v) },
+            )
+            .clickable(remember { MutableInteractionSource() }, indication = null) {
+                scope.launch { reveal.animateTo(if (reveal.value > 0.5f) 0f else 1f, springy) }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.size(width = 34.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(Brand.Mist.copy(alpha = 0.55f)))
+            Icon(
+                Icons.Rounded.KeyboardArrowDown, if (reveal.value > 0.5f) "Hide the top bar" else "Show the top bar",
+                tint = Brand.Mist,
+                modifier = Modifier.size(16.dp).graphicsLayer { rotationZ = 180f * reveal.value },
+            )
+            Box(Modifier.size(width = 34.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(Brand.Mist.copy(alpha = 0.55f)))
         }
     }
 }

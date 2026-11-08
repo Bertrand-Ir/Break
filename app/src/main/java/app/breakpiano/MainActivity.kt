@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
     private var listenOpen by mutableStateOf(false)
     private var listenVoice by mutableStateOf(false)
     private var listenCancelled = false
+    private var redetecting by mutableStateOf<String?>(null)
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) listenOpen = true else state.toast = "Break needs the microphone to listen"
     }
@@ -93,6 +94,7 @@ class MainActivity : ComponentActivity() {
             NativeEngine.start()
             state.onEngineReady()
             ready = true
+            launch { songLibrary.upgradeVoiceSongs() }     // older sung songs → the new voice tracker
             delay(400)
             state.latencyMs = NativeEngine.getLatencyMs()
         }
@@ -123,6 +125,9 @@ class MainActivity : ComponentActivity() {
                         onRecord = ::startListening,
                         onDone = { mic.stop() },
                     ),
+                    onRenameSong = { s, name -> songLibrary.rename(s, name) },
+                    onRedetectSong = ::redetectSong,
+                    redetecting = redetecting,
                     ready = ready,
                     importProgress = importProgress,
                     onImport = { pickAudio.launch(arrayOf("audio/*")) },
@@ -224,6 +229,20 @@ class MainActivity : ComponentActivity() {
             state.userTrackId = null
         }
         beats.delete(beat)
+    }
+
+    private fun redetectSong(song: app.breakpiano.learn.Song) = lifecycleScope.launch {
+        if (redetecting != null) return@launch
+        redetecting = song.id
+        try {
+            val updated = songLibrary.redetect(song)
+            if (learner.song?.id == song.id) learner.open(updated)
+            state.toast = "Notes detected again — ${updated.noteCount} notes"
+        } catch (t: Throwable) {
+            state.toast = t.message?.takeIf { it.length < 90 } ?: "Couldn't detect notes"
+        } finally {
+            redetecting = null
+        }
     }
 
     private fun openListen() {

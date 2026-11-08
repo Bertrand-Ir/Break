@@ -45,8 +45,9 @@ class Transcriber(private val context: Context) {
      * @param pcm 16-bit LE stereo file at [rate].
      * Progress: 0..0.15 resampling, 0.15..0.9 model, 0.9..1 note building.
      */
-    fun transcribe(pcm: File, rate: Int, onProgress: (Float) -> Unit): List<SongNote> {
-        val mono = readMono(pcm)
+    fun transcribe(pcm: File, rate: Int, micTake: Boolean = false, onProgress: (Float) -> Unit): List<SongNote> {
+        val mono = readPcmMono(pcm)
+        if (micTake) cleanMicTake(mono, rate)
         normalize(mono)
         onProgress(0.05f)
         val audio = resample(mono, rate, SR)
@@ -60,6 +61,31 @@ class Transcriber(private val context: Context) {
 
     // ── audio prep ───────────────────────────────────────────────────────────
 
+    /**
+     * Microphone takes: strip rumble / handling noise and gently gate the room noise between
+     * phrases, so the model only hears the music.
+     */
+    private fun cleanMicTake(x: FloatArray, rate: Int) {
+        highPass(x, rate, 55.0)
+        val block = rate / 50                                   // 20 ms
+        val nb = x.size / block
+        if (nb < 10) return
+        val db = FloatArray(nb) { b ->
+            var e = 0.0
+            for (i in b * block until (b + 1) * block) e += x[i].toDouble() * x[i]
+            (10 * kotlin.math.log10(e / block + 1e-12)).toFloat()
+        }
+        val floor = db.sorted()[(nb * 0.1).toInt()]
+        var g = 1f
+        for (b in 0 until nb) {
+            val target = ((db[b] - (floor + 4f)) / 8f).coerceIn(0.08f, 1f)   // fade to −22 dB near the floor
+            for (i in b * block until (b + 1) * block) {
+                g += (target - g) * 0.002f
+                x[i] *= g
+            }
+        }
+    }
+
     /** Peak-normalise (helps quiet microphone recordings; a no-op for mastered tracks). */
     private fun normalize(x: FloatArray) {
         var peak = 0f
@@ -69,24 +95,6 @@ class Transcriber(private val context: Context) {
         for (i in x.indices) x[i] *= g
     }
 
-    private fun readMono(file: File): FloatArray {
-        val frames = (file.length() / 4).toInt()
-        val out = FloatArray(frames)
-        val buf = ByteArray(1 shl 16)
-        var idx = 0
-        FileInputStream(file).use { input ->
-            while (true) {
-                val n = input.read(buf)
-                if (n <= 0) break
-                val bb = ByteBuffer.wrap(buf, 0, n - n % 4).order(ByteOrder.LITTLE_ENDIAN)
-                while (bb.remaining() >= 4 && idx < frames) {
-                    val l = bb.short.toInt(); val r = bb.short.toInt()
-                    out[idx++] = (l + r) / 65536f
-                }
-            }
-        }
-        return out
-    }
 
     // ── model ────────────────────────────────────────────────────────────────
 

@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Mic
@@ -47,6 +48,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
@@ -134,7 +137,12 @@ fun SongsModal(
     onLearn: (Song) -> Unit,
     onDelete: (Song) -> Unit,
     listen: ListenControls,
+    onRename: (Song, String) -> Unit,
+    onRedetect: (Song) -> Unit,
+    redetecting: String?,
 ) {
+    var editing by remember { mutableStateOf<Song?>(null) }
+    Box(Modifier.fillMaxSize()) {
     BigModal(
         title = "Learn songs",
         subtitle = "Turn a song into keys, then learn it note by note",
@@ -188,13 +196,26 @@ fun SongsModal(
                     }
                 }
             }
-            items(songs, key = { it.id }) { s -> SongCard(s, onLearn = { onLearn(s) }, onDelete = { onDelete(s) }) }
+            items(songs, key = { it.id }) { s ->
+                SongCard(s, onLearn = { onLearn(s) }, onDelete = { onDelete(s) }, onEdit = { editing = s }, busy = redetecting == s.id)
+            }
         }
+    }
+    editing?.let { e ->
+        val live = songs.firstOrNull { it.id == e.id } ?: e
+        EditSongDialog(
+            song = live,
+            busy = redetecting == live.id,
+            onSave = { name -> onRename(live, name); editing = null },
+            onRedetect = { onRedetect(live) },
+            onDismiss = { editing = null },
+        )
+    }
     }
 }
 
 @Composable
-private fun SongCard(song: Song, onLearn: () -> Unit, onDelete: () -> Unit) {
+private fun SongCard(song: Song, onLearn: () -> Unit, onDelete: () -> Unit, onEdit: () -> Unit, busy: Boolean) {
     var confirm by remember { mutableStateOf(false) }
     LaunchedEffect(confirm) { if (confirm) { kotlinx.coroutines.delay(2500); confirm = false } }
     val shape = RoundedCornerShape(18.dp)
@@ -204,10 +225,14 @@ private fun SongCard(song: Song, onLearn: () -> Unit, onDelete: () -> Unit) {
                 Icon(when (song.source) { "midi" -> Icons.Rounded.MusicNote; "voice", "listen" -> Icons.Rounded.Mic; else -> Icons.Rounded.LibraryMusic }, null, tint = Brand.Ivory, modifier = Modifier.size(24.dp))
             }
             Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f).clickable(onClick = onEdit)) {
                 Text(song.title, style = Type.Heading, color = Brand.Ivory, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${t(song.durationMs / 1000f)} · ${song.noteCount} notes · ${song.sourceLabel}",
                     style = Type.Body, color = Brand.Mist)
+            }
+            Box(Modifier.size(36.dp).clip(CircleShape).pressScale(onEdit), contentAlignment = Alignment.Center) {
+                if (busy) CircularProgressIndicator(color = Brand.Ivory, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                else Icon(Icons.Rounded.Edit, "Rename", tint = Brand.Mist, modifier = Modifier.size(19.dp))
             }
             Box(
                 Modifier.size(36.dp).clip(CircleShape).background(if (confirm) Brand.Rec else Color.Transparent)
@@ -286,6 +311,56 @@ private fun LevelMeter(levels: List<Float>, live: Boolean, modifier: Modifier) {
                 androidx.compose.ui.geometry.Size(bw, bh),
                 androidx.compose.ui.geometry.CornerRadius(bw / 2),
             )
+        }
+    }
+}
+
+/** Rename a song (and re-run note detection on its recording). Sits high so the keyboard can't cover it. */
+@Composable
+private fun EditSongDialog(song: Song, busy: Boolean, onSave: (String) -> Unit, onRedetect: () -> Unit, onDismiss: () -> Unit) {
+    var name by remember(song.id) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(song.title, androidx.compose.ui.text.TextRange(0, song.title.length))) }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(song.id) { focus.requestFocus() }
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))
+            .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = onDismiss),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Column(
+            Modifier.padding(top = 18.dp).width(460.dp).clip(RoundedCornerShape(22.dp)).background(Brand.Graphite)
+                .border(1.dp, Brand.Line, RoundedCornerShape(22.dp))
+                .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {}
+                .padding(20.dp),
+        ) {
+            Text("Edit song", style = Type.Title, color = Brand.Ivory)
+            Text("${song.sourceLabel} · ${t(song.durationMs / 1000f)} · ${song.noteCount} notes", style = Type.Body, color = Brand.Mist)
+            Spacer(Modifier.height(14.dp))
+            Text("NAME", style = Type.Caption, color = Brand.Dim)
+            Spacer(Modifier.height(6.dp))
+            androidx.compose.foundation.text.BasicTextField(
+                value = name,
+                onValueChange = { if (it.text.length <= 60) name = it },
+                singleLine = true,
+                textStyle = Type.Title.copy(color = Brand.Ivory),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(Brand.Ivory),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences,
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                ),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { onSave(name.text) }),
+                modifier = Modifier.fillMaxWidth().well(RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 12.dp)
+                    .focusRequester(focus),
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (song.hasAudio) {
+                    GhostButton(if (busy) "Detecting…" else "Detect notes again", Modifier.height(42.dp), icon = Icons.Rounded.Replay) { if (!busy) onRedetect() }
+                }
+                Spacer(Modifier.weight(1f))
+                GhostButton("Cancel", Modifier.height(42.dp)) { onDismiss() }
+                Spacer(Modifier.width(8.dp))
+                PrimaryButton("Save", Modifier.height(42.dp)) { onSave(name.text) }
+            }
         }
     }
 }
