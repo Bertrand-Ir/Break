@@ -84,8 +84,7 @@ object VoiceTranscriber {
         val frames = analyse(y)
         if (frames.isEmpty()) return emptyList()
         fixOctaves(frames)
-        val offset = tuningOffset(frames)
-        return segment(frames, offset)
+        return segment(frames, syllableOnsets(y))
     }
 
     // ── 2. frame analysis ────────────────────────────────────────────────────
@@ -173,26 +172,92 @@ object VoiceTranscriber {
         }
     }
 
-    /** How far (in semitones, −0.5..0.5) the singer sits from concert pitch, as a circular mean. */
-    private fun tuningOffset(fr: List<FrameM>): Float {
-        var sx = 0.0; var sy = 0.0
-        for (f in fr) if (f.voiced) {
-            val a = 2 * PI * (f.midi - f.midi.roundToInt())
-            sx += cos(a) * f.conf; sy += sin(a) * f.conf
+    /**
+     * Local tuning: how far (-0.5..0.5 semitones) the singer sits from concert pitch around each
+     * frame, as a confidence-weighted circular mean over +/-3 s. Follows a singer who slowly drifts.
+     */
+    private fun localTuning(fr: List<FrameM>): FloatArray {
+        val n = fr.size
+        val cx = DoubleArray(n + 1); val cy = DoubleArray(n + 1)
+        for (i in 0 until n) {
+            var x = 0.0; var y = 0.0
+            if (fr[i].voiced) {
+                val a = 2 * PI * (fr[i].midi - fr[i].midi.roundToInt())
+                x = cos(a) * fr[i].conf; y = sin(a) * fr[i].conf
+            }
+            cx[i + 1] = cx[i] + x; cy[i + 1] = cy[i] + y
         }
-        if (sx == 0.0 && sy == 0.0) return 0f
-        return (atan2(sy, sx) / (2 * PI)).toFloat()
+        val half = 300
+        return FloatArray(n) { i ->
+            val a = max(0, i - half); val b = min(n, i + half + 1)
+            val sx = cx[b] - cx[a]; val sy = cy[b] - cy[a]
+            if (sx == 0.0 && sy == 0.0) 0f else (atan2(sy, sx) / (2 * PI)).toFloat()
+        }
     }
 
-    // ── 4. note segmentation ─────────────────────────────────────────────────
+    // -- 4. note segmentation ------------------------------------------------
 
-    private fun segment(fr: List<FrameM>, offset: Float): List<SongNote> {
-        val notes = ArrayList<SongNote>()
+    private class Cand(val start: Float, val end: Float, val raw: Float, val vel: Float)
+
+    /**
+     * Fine-grained (5 ms) syllable starts: a short dip in loudness, or the hiss of a consonant
+     * ("t", "d", "k") between two vowels. Catches fast "tang-tang" on the same note that the
+     * 46 ms pitch window smears together.
+     */
+    private fun syllableOnsets(y: FloatArray): List<Float> {
+        val w = 128; val hop = 55
+        val n = (y.size - w) / hop
+        if (n < 30) return emptyList()
+        val env = FloatArray(n); val hf = FloatArray(n)
+        for (f in 0 until n) {
+            val o = f * hop
+            var e = 0.0; var h = 0.0
+            for (j in 1 until w) {
+                val v = y[o + j].toDouble(); e += v * v
+                val d = (y[o + j] - y[o + j - 1]).toDouble(); h += d * d
+            }
+            env[f] = (10 * log10(e / w + 1e-12)).toFloat()
+            hf[f] = (10 * log10(h / w + 1e-12)).toFloat()
+        }
+        val sorted = env.sorted()
+        val loud = sorted[(n * 0.9).toInt().coerceIn(0, n - 1)]
+        val out = ArrayList<Float>()
+        var last = -100
+        for (m in 12 until n - 12) {
+            if (env[m] > env[m - 1] || env[m] > env[m + 1]) continue          // local minimum of loudness
+            var before = -200f; var after = -200f
+            for (q in m - 12 until m) before = max(before, env[q])
+            for (q in m + 1..m + 12) after = max(after, env[q])
+            if (after < loud - 25f) continue                                // not followed by a sung vowel
+            val dip = min(before, after) - env[m]
+            // consonant hiss: high-frequency share jumps above its local norm
+            val tilt = ArrayList<Float>()
+            for (q in max(0, m - 30)..min(n - 1, m + 30)) tilt += hf[q] - env[q]
+            tilt.sort()
+            val norm = tilt[tilt.size / 2]
+            var hiss = false
+            for (q in m - 3..m + 3) if (hf[q] - env[q] - norm >= 6f) { hiss = true; break }
+            if ((dip >= 5f || (dip >= 2.5f && hiss)) && m - last > 16) {     // ≥ 80 ms apart
+                out += (m * hop + w / 2).toFloat() / SR
+                last = m
+            }
+        }
+        return out
+    }
+
+    private fun segment(fr: List<FrameM>, onsets: List<Float>): List<SongNote> {
+        val isOnset = BooleanArray(fr.size)
+        for (t in onsets) {
+            val f = ((t * SR - WIN / 2f) / HOP).roundToInt()
+            if (f in fr.indices) isOnset[f] = true
+        }
+        val tune = localTuning(fr)
+        val pc = FloatArray(fr.size) { if (fr[it].voiced) fr[it].midi - tune[it] else 0f }
+        val cands = ArrayList<Cand>()
         val dt = HOP.toFloat() / SR
         var i = 0
         while (i < fr.size) {
             if (!fr[i].voiced) { i++; continue }
-            // a voiced run (bridge gaps of ≤ 2 frames)
             var j = i
             var gap = 0
             while (j + 1 < fr.size && (fr[j + 1].voiced || gap < 2)) {
@@ -200,11 +265,11 @@ object VoiceTranscriber {
                 j++
             }
             while (j > i && !fr[j].voiced) j--
-            splitRun(fr, i, j, offset, dt, notes)
+            splitRun(fr, pc, isOnset, i, j, dt, cands)
             i = j + 1
         }
-        val clean = notes.filter { it.end - it.start >= 0.08f }.sortedBy { it.start }.toMutableList()
-        // a glide between two connected notes passes briefly through the pitches in between — drop those
+        val clean = snapToKey(cands.filter { it.end - it.start >= 0.08f }.sortedBy { it.start }).toMutableList()
+        // a glide between two connected notes passes briefly through the pitches in between: drop those
         var k = 1
         while (k < clean.size - 1) {
             val p = clean[k - 1]; val c = clean[k]; val nx = clean[k + 1]
@@ -218,40 +283,47 @@ object VoiceTranscriber {
         return clean
     }
 
-    private fun splitRun(fr: List<FrameM>, a: Int, b: Int, offset: Float, dt: Float, out: MutableList<SongNote>) {
+    private fun splitRun(fr: List<FrameM>, pc: FloatArray, isOnset: BooleanArray, a: Int, b: Int, dt: Float, out: MutableList<Cand>) {
         val cuts = ArrayList<Int>()
         cuts += a
-        // smoothed pitch for change detection
         fun medPitch(k: Int): Float {
             val v = ArrayList<Float>()
-            for (q in max(a, k - 2)..min(b, k + 2)) if (fr[q].voiced) v += fr[q].midi - offset
+            for (q in max(a, k - 2)..min(b, k + 2)) if (fr[q].voiced) v += pc[q]
             return if (v.isEmpty()) 0f else v.sorted()[v.size / 2]
         }
         var segStart = a
         var k = a + 1
         while (k <= b) {
-            // syllable attack: level drops then rises ≥ 6 dB within ~80 ms ("tan | tan")
             var minDb = fr[k].db
+            var minConf = 1f
             for (q in max(segStart, k - 8) until k) minDb = min(minDb, fr[q].db)
-            val attack = k - segStart > 8 && fr[k].db - minDb >= 6f && k + 1 <= b && fr[k + 1].db >= fr[k].db - 1f &&
-                (k - 1 >= 0 && fr[k - 1].db < fr[k].db)
-            // held pitch change (legato): the next 6 frames sit ≥ 0.75 st away from the note so far
+            for (q in max(segStart, k - 4) until k) minConf = min(minConf, fr[q].conf)
+            val rising = k + 1 <= b && fr[k + 1].db >= fr[k].db - 1f && k - 1 >= 0 && fr[k - 1].db < fr[k].db
+            // syllable attack: a clear level dip ("tan | tan"), or a softer dip where the voice briefly
+            // stopped being a clean tone (a quick "t" between syllables)
+            val attack = k - segStart > 7 && rising &&
+                (fr[k].db - minDb >= 4.5f || (fr[k].db - minDb >= 2.5f && minConf < 0.55f))
             var pitchChange = false
             if (k - segStart > 8 && k + 6 <= b) {
-                val cur = steadyPitch(fr, segStart, k - 1, offset)
+                val cur = steadyPitch(fr, pc, segStart, k - 1)
                 var all = true
                 for (q in k until k + 6) { if (!fr[q].voiced || abs(medPitch(q) - cur) < 0.75f) { all = false; break } }
                 pitchChange = all
             }
+            val syllable = isOnset[k] && k - segStart > 7 && b - k > 6
+            if (syllable && !attack && !pitchChange) {
+                cuts += k; segStart = k
+                k = segStart + 5
+                continue
+            }
             if (attack || pitchChange) {
-                // place the cut at the lowest level point just before an attack
                 var c = k
                 if (attack) { var m = k; for (q in max(segStart + 1, k - 8) until k) if (fr[q].db < fr[m].db) m = q; c = m }
                 if (c > segStart + 4) {
                     cuts += c; segStart = c
                     k = segStart + 5
                 } else {
-                    k++                       // too close to the note's start to be a new note
+                    k++
                 }
                 continue
             }
@@ -261,25 +333,76 @@ object VoiceTranscriber {
         for (s in 0 until cuts.size - 1) {
             val s0 = cuts[s]; val s1 = cuts[s + 1] - 1
             if (s1 - s0 < 6) continue
-            val p = steadyPitch(fr, s0, s1, offset)
+            val p = steadyPitch(fr, pc, s0, s1)
             if (p <= 0f) continue
             var peak = -120f
             for (q in s0..s1) peak = max(peak, fr[q].db)
             val vel = ((peak + 40f) / 34f).coerceIn(0.35f, 1f)
-            out += SongNote(fr[s0].t - (WIN / 2f) / SR + 0.01f, fr[s1].t + dt, p.roundToInt().coerceIn(21, 108), vel)
+            out += Cand(fr[s0].t - (WIN / 2f) / SR + 0.01f, fr[s1].t + dt, p, vel)
         }
     }
 
-    /** Median pitch over the steady middle of a segment (skips the scoop into the note and the tail). */
-    private fun steadyPitch(fr: List<FrameM>, a: Int, b: Int, offset: Float): Float {
+    /** The pitch aimed for: median of the steady, confident frames in the body of the note. */
+    private fun steadyPitch(fr: List<FrameM>, pc: FloatArray, a: Int, b: Int): Float {
         val len = b - a + 1
-        val from = a + (len * 0.25f).toInt()
+        val from = a + (len * 0.22f).toInt()
         val to = b - (len * 0.1f).toInt()
         val v = ArrayList<Float>()
-        for (q in from..max(from, to)) if (q <= b && fr[q].voiced) v += fr[q].midi - offset
-        if (v.size < 3) for (q in a..b) if (fr[q].voiced) v += fr[q].midi - offset
+        for (q in max(from, a + 1)..max(from, to)) {
+            if (q > b || !fr[q].voiced || !fr[q - 1].voiced) continue
+            if (abs(pc[q] - pc[q - 1]) < 0.2f && fr[q].conf > 0.6f) v += pc[q]
+        }
+        if (v.size < 3) for (q in a..b) if (fr[q].voiced) v += pc[q]
         if (v.isEmpty()) return 0f
         v.sort()
         return v[v.size / 2]
+    }
+
+    // -- 5. key awareness ----------------------------------------------------
+
+    private val MAJOR = doubleArrayOf(6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88)
+    private val MINOR = doubleArrayOf(6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17)
+    private val MAJOR_SCALE = intArrayOf(0, 2, 4, 5, 7, 9, 11)
+    private val MINOR_SCALE = intArrayOf(0, 2, 3, 5, 7, 8, 10, 11)
+
+    /**
+     * Works out the key of what was sung (Krumhansl-Kessler profiles). For notes sung almost
+     * halfway between two keys, it picks the one that belongs to that key: the note that was meant.
+     */
+    private fun snapToKey(c: List<Cand>): List<SongNote> {
+        val plain = c.map { SongNote(it.start, it.end, it.raw.roundToInt().coerceIn(21, 108), it.vel) }
+        if (c.size < 5) return plain
+        val hist = DoubleArray(12)
+        for (n in c) {
+            val r = n.raw.roundToInt()
+            val certain = abs(n.raw - r) < 0.3f
+            hist[((r % 12) + 12) % 12] += (n.end - n.start) * if (certain) 1.0 else 0.3
+        }
+        var best = -2.0; var bestTonic = 0; var bestMajor = true
+        for (tonic in 0 until 12) for (major in listOf(true, false)) {
+            val prof = if (major) MAJOR else MINOR
+            val r = pearson(hist) { prof[((it - tonic) % 12 + 12) % 12] }
+            if (r > best) { best = r; bestTonic = tonic; bestMajor = major }
+        }
+        if (best < 0.5) return plain
+        val scale = (if (bestMajor) MAJOR_SCALE else MINOR_SCALE).map { (it + bestTonic) % 12 }.toSet()
+        fun inKey(m: Int) = ((m % 12) + 12) % 12 in scale
+        return c.mapIndexed { i, n ->
+            val r = n.raw.roundToInt()
+            val frac = n.raw - r
+            if (!inKey(r) && abs(frac) > 0.22f) {
+                val alt = if (frac > 0) r + 1 else r - 1
+                if (inKey(alt)) return@mapIndexed plain[i].copy(pitch = alt.coerceIn(21, 108))
+            }
+            plain[i]
+        }
+    }
+
+    private fun pearson(x: DoubleArray, y: (Int) -> Double): Double {
+        val ys = DoubleArray(12) { y(it) }
+        val mx = x.average(); val my = ys.average()
+        var sxy = 0.0; var sxx = 0.0; var syy = 0.0
+        for (i in 0 until 12) { val a = x[i] - mx; val b = ys[i] - my; sxy += a * b; sxx += a * a; syy += b * b }
+        return if (sxx == 0.0 || syy == 0.0) 0.0 else sxy / sqrt(sxx * syy)
     }
 }

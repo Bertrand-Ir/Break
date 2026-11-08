@@ -291,12 +291,15 @@ fun PianoKeys(
                 val labelStyleC = TextStyle(fontFamily = Manrope, fontWeight = FontWeight(800), fontSize = labelSize, color = Color(0xFF5A5347))
                 val labelStyle = TextStyle(fontFamily = Manrope, fontWeight = FontWeight(600), fontSize = labelSize, color = Color(0xFF9C9486))
                 val octStyle = labelStyle.copy(fontSize = labelSize * 0.68f, fontWeight = FontWeight(700))
+                val badgeStyle = TextStyle(fontFamily = Manrope, fontWeight = FontWeight(800), fontSize = min(ww * 0.28f, 12.dp.toPx()).toSp(), color = Color.White)
                 val blackLabelStyle = TextStyle(fontFamily = Manrope, fontWeight = FontWeight(700), fontSize = min(bw * 0.30f, 10.dp.toPx()).toSp(), color = Color.White.copy(alpha = 0.55f))
 
                 onDrawBehind {
                     @Suppress("UNUSED_VARIABLE") val v = model.version
                     @Suppress("UNUSED_VARIABLE") val lv = learner?.version
                     val guides = if (learner != null && learner.active) learner.guide else null
+                    val auto = if (learner != null && learner.active) learner.autoDown else null
+                    val nowMs = SystemClock.uptimeMillis()
                     val s = start()
                     geo.width = w; geo.height = h; geo.start = s; geo.visible = visible
                     val mode = state.labelMode
@@ -313,7 +316,7 @@ fun PianoKeys(
                     for (j in first..last) {
                         val note = PianoLayout.whites[j]
                         val left = (j - s) * ww + gap / 2
-                        val pressed = model.down[note] > 0
+                        val pressed = model.down[note] > 0 || (auto != null && auto[note])
                         val lip = if (pressed) lipP else lipN
 
                         drawRoundRect(if (pressed) whitePressed else whiteBody, Offset(left, -r), Size(kw, h + r), CornerRadius(r))
@@ -337,12 +340,27 @@ fun PianoKeys(
                             drawRect(Color.Black.copy(alpha = 0.07f), Offset(left + kw - dp1 * 1.5f, 0f), Size(dp1 * 1.5f, h - lip - r * 0.5f))
                         }
 
-                        if (guides != null && guides[note] > 0f) {
+                        if (guides != null && learner != null) {
                             val g = guides[note]
-                            val c = if (learner!!.guideHand[note] == 1) Brand.HandLeft else Brand.HandRight
-                            val top = h * 0.5f
-                            drawRect(c.copy(alpha = 0.12f + 0.38f * g), Offset(left, top), Size(kw, h - lip - top))
-                            drawRect(c.copy(alpha = 0.5f + 0.5f * g), Offset(left, h - lip - 4.dp.toPx()), Size(kw, 4.dp.toPx()))
+                            if (g > 0f) {
+                                val c = if (learner.guideHand[note] == 1) Brand.HandLeft else Brand.HandRight
+                                val top = h * 0.5f
+                                drawRect(c.copy(alpha = 0.10f + 0.32f * g), Offset(left, top), Size(kw, h - lip - top))
+                                drawRect(c.copy(alpha = 0.5f + 0.5f * g), Offset(left, h - lip - 4.dp.toPx()), Size(kw, 4.dp.toPx()))
+                            }
+                            // correct hit: a quick flash in the hand's colour
+                            val hitAge = nowMs - learner.hitAt[note]
+                            if (hitAge in 0..420) {
+                                val a = 1f - hitAge / 420f
+                                val c = if (learner.hitHand[note] == 1) Brand.HandLeft else Brand.HandRight
+                                drawRect(c.copy(alpha = 0.55f * a), Offset(left, 0f), Size(kw, h - lip))
+                            }
+                            // wrong key: turns red
+                            val wrongAge = nowMs - learner.wrongAt[note]
+                            if (wrongAge in 0..520) {
+                                val a = 1f - wrongAge / 520f
+                                drawRect(Color(0xFFFF4D57).copy(alpha = 0.7f * a), Offset(left, 0f), Size(kw, h - lip))
+                            }
                         }
 
                         // label
@@ -365,6 +383,15 @@ fun PianoKeys(
                             drawText(main, topLeft = Offset(tx, labelTop))
                             if (oct != null) drawText(oct, topLeft = Offset(tx + main.size.width, labelBottom - oct.size.height - main.size.height * 0.08f))
                         }
+                        if (learner != null && learner.active && note in learner.nextPitches) {
+                            val c = if (learner.guideHand[note] == 1) Brand.HandLeft else Brand.HandRight
+                            val t = measurer.measure(PianoLayout.name(note, solfege, flats), badgeStyle)
+                            val bwid = max(t.size.width + 10 * dp1, min(kw * 0.86f, 30 * dp1))
+                            val bh = t.size.height + 4 * dp1
+                            val by = h - lipN - bh - 26 * dp1
+                            drawRoundRect(c, Offset(left + (kw - bwid) / 2, by), Size(bwid, bh), CornerRadius(bh / 2))
+                            drawText(t, topLeft = Offset(left + (kw - t.size.width) / 2, by + 2 * dp1))
+                        }
                         if (note == 60) {
                             drawCircle(Color(0xFF8E877B), radius = 2.2f * dp1, center = Offset(left + kw / 2, labelTop - 6 * dp1))
                         }
@@ -377,7 +404,7 @@ fun PianoKeys(
                         val cx = (j + 1 + PianoLayout.blackOffset(bn) - s) * ww
                         val bx = cx - bw / 2
                         if (bx > w || bx + bw < 0) continue
-                        val pressed = model.down[bn] > 0
+                        val pressed = model.down[bn] > 0 || (auto != null && auto[bn])
                         val bev = if (pressed) bevP else bevN
                         translate(bx, 0f) {
                             val sh = if (pressed) 1.5f * dp1 else 3f * dp1
@@ -400,10 +427,25 @@ fun PianoKeys(
                             bevelPath.close()
                             drawPath(bevelPath, if (pressed) bevelP else bevelN)
                             drawLine(Color.White.copy(alpha = if (pressed) 0.08f else 0.16f), Offset(inset, bh - bev), Offset(bw - inset, bh - bev), dp1)
-                            if (guides != null && guides[bn] > 0f) {
+                            if (guides != null && learner != null) {
                                 val g = guides[bn]
-                                val c = if (learner!!.guideHand[bn] == 1) Brand.HandLeft else Brand.HandRight
-                                drawRoundRect(c.copy(alpha = 0.25f + 0.55f * g), Offset(inset, bh * 0.45f), Size(bw - inset * 2, bh * 0.55f - bev), CornerRadius(rb * 0.8f))
+                                if (g > 0f) {
+                                    val c = if (learner.guideHand[bn] == 1) Brand.HandLeft else Brand.HandRight
+                                    drawRoundRect(c.copy(alpha = 0.25f + 0.55f * g), Offset(inset, bh * 0.45f), Size(bw - inset * 2, bh * 0.55f - bev), CornerRadius(rb * 0.8f))
+                                }
+                                val hitAge = nowMs - learner.hitAt[bn]
+                                if (hitAge in 0..420) {
+                                    val c = if (learner.hitHand[bn] == 1) Brand.HandLeft else Brand.HandRight
+                                    drawRoundRect(c.copy(alpha = 0.7f * (1f - hitAge / 420f)), Offset(0f, 0f), Size(bw, bh), CornerRadius(rb))
+                                }
+                                val wrongAge = nowMs - learner.wrongAt[bn]
+                                if (wrongAge in 0..520) {
+                                    drawRoundRect(Color(0xFFFF4D57).copy(alpha = 0.8f * (1f - wrongAge / 520f)), Offset(0f, 0f), Size(bw, bh), CornerRadius(rb))
+                                }
+                                if (bn in learner.nextPitches) {
+                                    val c = if (learner.guideHand[bn] == 1) Brand.HandLeft else Brand.HandRight
+                                    drawCircle(c, radius = min(bw * 0.28f, 7 * dp1), center = Offset(bw / 2, bh - bev - min(bw * 0.28f, 7 * dp1) - 6 * dp1))
+                                }
                             }
                             if (mode == LabelMode.All) {
                                 val t = measurer.measure(PianoLayout.name(bn, solfege, flats), blackLabelStyle)

@@ -142,6 +142,7 @@ fun SongsModal(
     redetecting: String?,
 ) {
     var editing by remember { mutableStateOf<Song?>(null) }
+    var deleting by remember { mutableStateOf<Song?>(null) }
     Box(Modifier.fillMaxSize()) {
     BigModal(
         title = "Learn songs",
@@ -197,7 +198,7 @@ fun SongsModal(
                 }
             }
             items(songs, key = { it.id }) { s ->
-                SongCard(s, onLearn = { onLearn(s) }, onDelete = { onDelete(s) }, onEdit = { editing = s }, busy = redetecting == s.id)
+                SongCard(s, onLearn = { onLearn(s) }, onDelete = { deleting = s }, onEdit = { editing = s }, busy = redetecting == s.id)
             }
         }
     }
@@ -208,16 +209,18 @@ fun SongsModal(
             busy = redetecting == live.id,
             onSave = { name -> onRename(live, name); editing = null },
             onRedetect = { onRedetect(live) },
+            onDelete = { deleting = live },
             onDismiss = { editing = null },
         )
+    }
+    deleting?.let { d ->
+        ConfirmDelete(d, onConfirm = { onDelete(d); deleting = null; editing = null }, onDismiss = { deleting = null })
     }
     }
 }
 
 @Composable
 private fun SongCard(song: Song, onLearn: () -> Unit, onDelete: () -> Unit, onEdit: () -> Unit, busy: Boolean) {
-    var confirm by remember { mutableStateOf(false) }
-    LaunchedEffect(confirm) { if (confirm) { kotlinx.coroutines.delay(2500); confirm = false } }
     val shape = RoundedCornerShape(18.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(Brand.Slate).border(1.dp, Brand.SlateHi, shape).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -234,11 +237,9 @@ private fun SongCard(song: Song, onLearn: () -> Unit, onDelete: () -> Unit, onEd
                 if (busy) CircularProgressIndicator(color = Brand.Ivory, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                 else Icon(Icons.Rounded.Edit, "Rename", tint = Brand.Mist, modifier = Modifier.size(19.dp))
             }
-            Box(
-                Modifier.size(36.dp).clip(CircleShape).background(if (confirm) Brand.Rec else Color.Transparent)
-                    .pressScale({ if (confirm) onDelete() else confirm = true }),
-                contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Rounded.DeleteOutline, if (confirm) "Tap again to delete" else "Delete", tint = if (confirm) Color.White else Brand.Mist, modifier = Modifier.size(19.dp)) }
+            Box(Modifier.size(36.dp).clip(CircleShape).pressScale(onDelete), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.DeleteOutline, "Delete", tint = Brand.Mist, modifier = Modifier.size(19.dp))
+            }
         }
         Spacer(Modifier.height(12.dp))
         PrimaryButton("Learn this song", Modifier.fillMaxWidth().height(42.dp), icon = Icons.Rounded.School, onClick = onLearn)
@@ -317,7 +318,7 @@ private fun LevelMeter(levels: List<Float>, live: Boolean, modifier: Modifier) {
 
 /** Rename a song (and re-run note detection on its recording). Sits high so the keyboard can't cover it. */
 @Composable
-private fun EditSongDialog(song: Song, busy: Boolean, onSave: (String) -> Unit, onRedetect: () -> Unit, onDismiss: () -> Unit) {
+private fun EditSongDialog(song: Song, busy: Boolean, onSave: (String) -> Unit, onRedetect: () -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit) {
     var name by remember(song.id) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(song.title, androidx.compose.ui.text.TextRange(0, song.title.length))) }
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(song.id) { focus.requestFocus() }
@@ -354,12 +355,50 @@ private fun EditSongDialog(song: Song, busy: Boolean, onSave: (String) -> Unit, 
             Spacer(Modifier.height(16.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (song.hasAudio) {
-                    GhostButton(if (busy) "Detecting…" else "Detect notes again", Modifier.height(42.dp), icon = Icons.Rounded.Replay) { if (!busy) onRedetect() }
+                    GhostButton(if (busy) "Detecting…" else "Detect again", Modifier.height(42.dp), icon = Icons.Rounded.Replay) { if (!busy) onRedetect() }
+                    Spacer(Modifier.width(8.dp))
                 }
+                GhostButton("Delete", Modifier.height(42.dp), icon = Icons.Rounded.DeleteOutline) { onDelete() }
                 Spacer(Modifier.weight(1f))
                 GhostButton("Cancel", Modifier.height(42.dp)) { onDismiss() }
                 Spacer(Modifier.width(8.dp))
                 PrimaryButton("Save", Modifier.height(42.dp)) { onSave(name.text) }
+            }
+        }
+    }
+}
+
+/** Clear, one-step confirmation before a song (and its recording) is removed. */
+@Composable
+private fun ConfirmDelete(song: Song, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f))
+            .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = onDismiss),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier.width(420.dp).clip(RoundedCornerShape(22.dp)).background(Brand.Graphite)
+                .border(1.dp, Brand.Line, RoundedCornerShape(22.dp))
+                .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {}
+                .padding(22.dp),
+        ) {
+            Text("Delete this song?", style = Type.Title, color = Brand.Ivory)
+            Spacer(Modifier.height(6.dp))
+            Text("“${song.title}” and ${if (song.hasAudio) "its recording and notes" else "its notes"} will be removed from Break.",
+                style = Type.Body, color = Brand.Mist)
+            Spacer(Modifier.height(18.dp))
+            Row {
+                Spacer(Modifier.weight(1f))
+                GhostButton("Cancel", Modifier.height(44.dp)) { onDismiss() }
+                Spacer(Modifier.width(10.dp))
+                Row(
+                    Modifier.height(44.dp).clip(RoundedCornerShape(14.dp)).background(Brand.Rec).pressScale(onConfirm).padding(horizontal = 18.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.DeleteOutline, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Delete", style = Type.Heading, color = Color.White)
+                }
             }
         }
     }
