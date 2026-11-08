@@ -71,4 +71,21 @@ object NativeEngine {
     external fun getSampleRate(): Int
     external fun getLatencyMs(): Float
     external fun collectGarbage()
+
+    // instrument preview — its own channel, never changes what you're playing
+    external fun previewProgram(bank: Int, program: Int)
+    external fun previewNote(note: Int, velocity: Float)
+    external fun previewStop()
+
+    // looper
+    const val LOOP_MAIN = 0
+    const val LOOP_STOP = 1
+    const val LOOP_CLEAR = 2
+    external fun looperAction(action: Int)
+    external fun setLoopVolume(volume: Float)
+    /** 0 empty · 1 armed · 2 recording · 3 playing · 4 overdub · 5 stopped · 6 waiting to play */
+    external fun getLooperState(): Int
+    external fun getLooperPosition(): Float
+    external fun getLooperLength(): Float
+    external fun getLooperRecorded(): Float
 }

@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import app.breakpiano.BuildConfig
 import app.breakpiano.ui.components.GhostButton
 import app.breakpiano.ui.components.PrimaryButton
+import app.breakpiano.ui.components.ProgressLine
 import app.breakpiano.ui.theme.Brand
 import app.breakpiano.ui.theme.Type
 import app.breakpiano.update.UpdateState
@@ -52,7 +53,7 @@ fun UpdateDialog(updater: Updater) {
     ) {
         Column(
             Modifier.width(440.dp).clip(RoundedCornerShape(26.dp))
-                .background(Brush.verticalGradient(listOf(Color(0xFF1D1D25), Color(0xFF131318))))
+                .background(Brand.Graphite)
                 .border(1.dp, Brand.Line, RoundedCornerShape(26.dp))
                 .padding(24.dp),
         ) {
@@ -71,7 +72,7 @@ fun UpdateDialog(updater: Updater) {
                         is UpdateState.ReadyToInstall -> s.release
                         else -> null
                     }
-                    Text("${BuildConfig.VERSION_NAME}  →  ${rel?.versionName ?: ""}", style = Type.Body, color = Brand.EmberHi)
+                    Text("${BuildConfig.VERSION_NAME}  →  ${rel?.versionName ?: ""}", style = Type.Body, color = Brand.Mist)
                 }
             }
             when (s) {
@@ -91,7 +92,7 @@ fun UpdateDialog(updater: Updater) {
                 }
                 is UpdateState.Downloading -> {
                     Text("Downloading… ${(s.progress * 100).roundToInt()}%", style = Type.Heading, color = Brand.Ivory, modifier = Modifier.padding(top = 20.dp))
-                    ProgressLine(s.progress)
+                    ProgressLine(s.progress, Modifier.padding(top = 10.dp))
                     Text("Keep playing — Android will ask you to confirm when it's ready.", style = Type.Body, color = Brand.Mist, modifier = Modifier.padding(top = 10.dp))
                 }
                 is UpdateState.ReadyToInstall -> {

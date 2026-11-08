@@ -56,11 +56,13 @@ import app.breakpiano.ui.components.Card
 import app.breakpiano.ui.components.GhostButton
 import app.breakpiano.ui.components.IconChip
 import app.breakpiano.ui.components.PrimaryButton
+import app.breakpiano.ui.components.ProgressLine
 import app.breakpiano.ui.components.SectionLabel
 import app.breakpiano.ui.components.Segmented
 import app.breakpiano.ui.components.SettingRow
 import app.breakpiano.ui.components.SliderRow
 import app.breakpiano.ui.components.ToggleRow
+import app.breakpiano.ui.components.control
 import app.breakpiano.ui.theme.Brand
 import app.breakpiano.ui.theme.Type
 import app.breakpiano.update.UpdateState
@@ -93,13 +95,12 @@ fun SettingsScreen(state: BreakState, updater: Updater) {
             Text("Settings", style = Type.Body, color = Brand.Dim, modifier = Modifier.padding(top = 4.dp, bottom = 18.dp))
             Section.entries.forEachIndexed { i, s ->
                 val sel = i == section
-                val bg by animateColorAsState(if (sel) Brand.Slate else Color.Transparent, label = "nav")
                 Row(
-                    Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(12.dp)).background(bg)
+                    Modifier.fillMaxWidth().height(44.dp).then(if (sel) Modifier.control(true) else Modifier.clip(RoundedCornerShape(12.dp)))
                         .clickable { section = i }.padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(s.icon, null, tint = if (sel) Brand.Ember else Brand.Mist, modifier = Modifier.size(20.dp))
+                    Icon(s.icon, null, tint = if (sel) Brand.Ivory else Brand.Mist, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(12.dp))
                     Text(s.title, style = Type.Heading, color = if (sel) Brand.Ivory else Brand.Mist)
                     if (s == Section.Updates && updater.state is UpdateState.Available) {
@@ -222,7 +223,7 @@ private fun UpdateSettings(state: BreakState, updater: Updater) {
     Spacer(Modifier.height(8.dp))
     when (val s = updater.state) {
         is UpdateState.Checking -> Row(verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(color = Brand.Ember, strokeWidth = 2.5.dp, modifier = Modifier.size(22.dp))
+            CircularProgressIndicator(color = Brand.Ivory, strokeWidth = 2.5.dp, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(12.dp)); Text("Checking GitHub…", style = Type.Heading, color = Brand.Ivory)
         }
         is UpdateState.Available -> Card {
@@ -233,7 +234,7 @@ private fun UpdateSettings(state: BreakState, updater: Updater) {
         }
         is UpdateState.Downloading -> Card {
             Text("Downloading ${s.release.versionName}… ${(s.progress * 100).roundToInt()}%", style = Type.Heading, color = Brand.Ivory)
-            ProgressLine(s.progress)
+            ProgressLine(s.progress, Modifier.padding(top = 10.dp))
         }
         is UpdateState.UpToDate -> Text("You're on the latest build.", style = Type.Heading, color = Brand.Success)
         is UpdateState.Failed -> Text(s.message, style = Type.Heading, color = Color(0xFFFF6B6B))
@@ -244,24 +245,17 @@ private fun UpdateSettings(state: BreakState, updater: Updater) {
 }
 
 @Composable
-fun ProgressLine(progress: Float) {
-    Box(Modifier.fillMaxWidth().padding(top = 10.dp).height(6.dp).clip(CircleShape).background(Brand.Line)) {
-        Box(Modifier.fillMaxWidth(progress.coerceIn(0f, 1f)).fillMaxHeight().clip(CircleShape).background(Brand.EmberGradient))
-    }
-}
-
-@Composable
 private fun AboutSection() {
     Column(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalAlignment = Alignment.Start) {
         Box(
             Modifier.size(96.dp).clip(RoundedCornerShape(26.dp))
-                .background(Brush.verticalGradient(listOf(Color(0xFF1C1C24), Color(0xFF09090C))))
+                .background(Brand.Obsidian)
                 .border(1.dp, Brand.Line, RoundedCornerShape(26.dp)),
             contentAlignment = Alignment.Center,
         ) { BreakMark(56.dp) }
         Spacer(Modifier.height(16.dp))
         Text("break", style = Type.Display, color = Brand.Ivory)
-        Text("Play anywhere.", style = Type.Title, color = Brand.EmberHi)
+        Text("Play anywhere.", style = Type.Title, color = Brand.Ember)
         Spacer(Modifier.height(12.dp))
         Text(
             "A real piano feel in your pocket — sampled instruments, live grooves and a studio mix engine tuned for the lowest latency your phone can do.",

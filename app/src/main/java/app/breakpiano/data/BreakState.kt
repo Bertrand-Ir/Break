@@ -105,6 +105,7 @@ class BreakState(context: Context) {
     var beatKey: Int by int("beatKey", 0) { NativeEngine.setBeatKey(it) }
     var bassOn: Boolean by bool("bassOn", true) { NativeEngine.setBassEnabled(it) }
     var userLoop: Boolean by bool("userLoop", true) { NativeEngine.setUserTrackLoop(it) }
+    var loopVol: Float by float("loopVol", 0.9f) { NativeEngine.setLoopVolume(it) }
 
     // ── Updates ──
     var autoUpdate: Boolean by bool("autoUpdate", true)
@@ -121,6 +122,11 @@ class BreakState(context: Context) {
     var panel by mutableStateOf(Panel.None)
     var latencyMs by mutableFloatStateOf(-1f)
     var toast by mutableStateOf<String?>(null)
+    var beatsTab by mutableIntStateOf(0)            // 0 styles · 1 my beats · 2 mix
+    var loopState by mutableIntStateOf(0)
+    var loopPos by mutableFloatStateOf(0f)
+    var loopLenSec by mutableFloatStateOf(0f)
+    var loopRecSec by mutableFloatStateOf(0f)
 
     val instrument: Instrument get() = Instruments.byId(instrumentId) ?: Instruments.default
     val layer: Instrument? get() = Instruments.byId(layerId)
@@ -140,6 +146,7 @@ class BreakState(context: Context) {
         NativeEngine.setBassEnabled(bassOn)
         NativeEngine.setUserTrackLoop(userLoop)
         NativeEngine.setSustain(sustain)
+        NativeEngine.setLoopVolume(loopVol)
         loadPattern()
     }
 
@@ -210,6 +217,8 @@ class BreakState(context: Context) {
         userTrackPlaying = on
     }
 
+    fun looper(action: Int) = NativeEngine.looperAction(action)
+
     // Tap tempo
     private val taps = ArrayDeque<Long>()
     fun tapTempo() {
@@ -226,6 +235,12 @@ class BreakState(context: Context) {
     /** Polled every frame by the UI. */
     fun pollEngine() {
         beatStatus = NativeEngine.getBeatStatus()
+        loopState = NativeEngine.getLooperState()
+        if (loopState != 0) {
+            loopPos = NativeEngine.getLooperPosition()
+            loopLenSec = NativeEngine.getLooperLength()
+            loopRecSec = NativeEngine.getLooperRecorded()
+        }
         if (userTrackId != null) {
             userTrackPos = NativeEngine.getUserTrackPosition()
             val up = NativeEngine.isUserTrackPlaying()

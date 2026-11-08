@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import app.breakpiano.data.BreakState
 import app.breakpiano.data.LabelMode
 import app.breakpiano.data.Notation
+import app.breakpiano.ui.components.control
 import app.breakpiano.ui.components.pressScale
 import app.breakpiano.ui.theme.Brand
 import app.breakpiano.ui.theme.Manrope
@@ -357,9 +358,8 @@ fun PianoKeys(
                         val glow = if (glowOn) model.glow(bn, now) else 0f
                         val bev = if (pressed) bevP else bevN
                         translate(bx, 0f) {
-                            val sh = if (pressed) 1.5f * dp1 else 3.5f * dp1
-                            drawRoundRect(Color.Black.copy(alpha = 0.16f), Offset(sh * 1.4f, -r), Size(bw + sh * 0.6f, bh + sh * 2.2f + r), CornerRadius(rb * 1.8f))
-                            drawRoundRect(Color.Black.copy(alpha = 0.30f), Offset(sh * 0.6f, -r), Size(bw, bh + sh + r), CornerRadius(rb))
+                            val sh = if (pressed) 1.5f * dp1 else 3f * dp1
+                            drawRoundRect(Color.Black.copy(alpha = 0.28f), Offset(sh, -r), Size(bw, bh + sh * 1.6f + r), CornerRadius(rb * 1.5f))
                             drawRoundRect(blackBody, Offset(0f, -r), Size(bw, bh + r), CornerRadius(rb))
                             drawRoundRect(blackTop, Offset(inset, -r), Size(bw - inset * 2, bh - bev + r), CornerRadius(rb * 0.8f))
                             drawRoundRect(gloss, Offset(inset + (bw - 2 * inset) * 0.16f, 0f), Size((bw - 2 * inset) * 0.2f, (bh - bev) * 0.86f), CornerRadius(rb))
@@ -378,7 +378,7 @@ fun PianoKeys(
                                 )
                             }
                             if (mode == LabelMode.All) {
-                                val t = measurer.measure(PianoLayout.name(bn, solfege, flats), if (pressed) blackLabelStyle.copy(color = Brand.EmberHi) else blackLabelStyle)
+                                val t = measurer.measure(PianoLayout.name(bn, solfege, flats), if (pressed) blackLabelStyle.copy(color = Brand.Ember) else blackLabelStyle)
                                 drawText(t, topLeft = Offset((bw - t.size.width) / 2, bh - bev - t.size.height - 4 * dp1))
                             }
                         }
@@ -403,13 +403,7 @@ fun PianoKeys(
                                     ),
                                     Offset(cxk - ww * 1.1f, 0f), Size(ww * 2.2f, feltH + ww * 1.1f),
                                 )
-                                drawRect(
-                                    Brush.horizontalGradient(
-                                        listOf(Brand.EmberHi.copy(alpha = 0.95f * g), Brand.EmberLo.copy(alpha = 0.95f * g)),
-                                        startX = cxk - half, endX = cxk + half,
-                                    ),
-                                    Offset(cxk - half, feltH - 2.5f * dp1), Size(half * 2, 2.5f * dp1),
-                                )
+                                drawRect(Brand.Ember.copy(alpha = 0.95f * g), Offset(cxk - half, feltH - 2.5f * dp1), Size(half * 2, 2.5f * dp1))
                             }
                         }
                     }
@@ -464,7 +458,7 @@ fun KeyboardMiniMap(
                 val bn = PianoLayout.whites[j] + 1
                 if (bn > PianoLayout.LAST || !PianoLayout.isBlack(bn)) continue
                 val cx = (j + 1) * kw
-                val c = if (model.down[bn] > 0) Brand.EmberHi else Color(0xFF16161A)
+                val c = if (model.down[bn] > 0) Brand.Ember else Color(0xFF16161A)
                 drawRect(c, Offset(cx - kw * 0.32f, 1f), Size(kw * 0.64f, h * 0.6f))
             }
             // dim what's off-screen, frame what's on-screen
@@ -472,8 +466,7 @@ fun KeyboardMiniMap(
             val x1 = (s + visible) * kw
             drawRect(Color.Black.copy(alpha = 0.55f), Offset.Zero, Size(x0, h))
             drawRect(Color.Black.copy(alpha = 0.55f), Offset(x1, 0f), Size(w - x1, h))
-            drawRoundRect(Brand.Ember.copy(alpha = 0.10f), Offset(x0, 0f), Size(x1 - x0, h), CornerRadius(3.dp.toPx()))
-            drawRoundRect(Brand.Ember, Offset(x0 + 1f, 1f), Size(x1 - x0 - 2f, h - 2f), CornerRadius(3.dp.toPx()), style = Stroke(1.6.dp.toPx()))
+            drawRoundRect(Brand.Ivory, Offset(x0 + 1f, 1f), Size(x1 - x0 - 2f, h - 2f), CornerRadius(3.dp.toPx()), style = Stroke(1.6.dp.toPx()))
         }
         MiniArrow(left = false) { onStep(1) }
     }
@@ -484,8 +477,7 @@ private fun MiniArrow(left: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
             .size(width = 34.dp, height = 22.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(Brand.Slate)
+            .control(false, RoundedCornerShape(6.dp))
             .pressScale(onClick),
         contentAlignment = Alignment.Center,
     ) {

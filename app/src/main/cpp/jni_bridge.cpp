@@ -118,3 +118,19 @@ JFN(jfloat, getLevel)(JNIEnv *, jobject) { return E().uiLevel.load(); }
 JFN(jint, getSampleRate)(JNIEnv *, jobject) { return E().sampleRate(); }
 JFN(jfloat, getLatencyMs)(JNIEnv *, jobject) { return (jfloat) E().latencyMs(); }
 JFN(void, collectGarbage)(JNIEnv *, jobject) { E().collectGarbage(); }
+
+// ── instrument preview (separate channel, never touches what you're playing) ──
+JFN(void, previewProgram)(JNIEnv *, jobject, jint bank, jint program) { E().push(C_PREVIEW_PRESET, bank, program); }
+JFN(void, previewNote)(JNIEnv *, jobject, jint note, jfloat vel) { E().push(C_PREVIEW_NOTE, note, 0, vel); }
+JFN(void, previewStop)(JNIEnv *, jobject) { E().push(C_PREVIEW_STOP); }
+
+// ── looper ──
+JFN(void, looperAction)(JNIEnv *, jobject, jint action) {
+    E().prepareLooper(120);
+    E().push(C_LOOP, action);
+}
+JFN(void, setLoopVolume)(JNIEnv *, jobject, jfloat v) { E().loopVol = v; }
+JFN(jint, getLooperState)(JNIEnv *, jobject) { return E().uiLoopState.load(); }
+JFN(jfloat, getLooperPosition)(JNIEnv *, jobject) { return E().uiLoopPos.load(); }
+JFN(jfloat, getLooperLength)(JNIEnv *, jobject) { return E().uiLoopLenSec.load(); }
+JFN(jfloat, getLooperRecorded)(JNIEnv *, jobject) { return E().uiLoopRecSec.load(); }

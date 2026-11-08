@@ -1,6 +1,5 @@
 package app.breakpiano.ui.components
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -11,6 +10,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,8 +43,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
@@ -54,7 +59,7 @@ import app.breakpiano.ui.theme.Brand
 import app.breakpiano.ui.theme.Type
 
 /** Tactile press: shrinks a touch while held, no ripple. */
-fun Modifier.pressScale(onClick: () -> Unit, enabled: Boolean = true, pressedScale: Float = 0.94f): Modifier = composed {
+fun Modifier.pressScale(onClick: () -> Unit, enabled: Boolean = true, pressedScale: Float = 0.95f): Modifier = composed {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) pressedScale else 1f, spring(dampingRatio = 0.6f, stiffness = 900f), label = "press")
@@ -62,6 +67,33 @@ fun Modifier.pressScale(onClick: () -> Unit, enabled: Boolean = true, pressedSca
         .graphicsLayer { scaleX = scale; scaleY = scale }
         .clickable(interaction, indication = null, enabled = enabled, onClick = onClick)
 }
+
+/**
+ * The one control surface of Break. Idle = a raised grey key with a soft top highlight.
+ * Active = pressed in: darker grey, sitting below its neighbours with an inner shadow.
+ */
+fun Modifier.control(active: Boolean, shape: Shape = RoundedCornerShape(12.dp)): Modifier = this
+    .clip(shape)
+    .background(if (active) Brand.Pressed else Brand.Slate)
+    .drawBehind {
+        if (active) {
+            val d = 7.dp.toPx()
+            drawRect(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent), endY = d), size = Size(size.width, d))
+            drawRect(Color.Black.copy(alpha = 0.35f), size = Size(2.dp.toPx(), size.height))
+        } else {
+            drawRect(Color.White.copy(alpha = 0.07f), size = Size(size.width, 1.dp.toPx()))
+            drawRect(Color.Black.copy(alpha = 0.25f), topLeft = Offset(0f, size.height - 1.5.dp.toPx()), size = Size(size.width, 1.5.dp.toPx()))
+        }
+    }
+    .border(1.dp, if (active) Color.Black.copy(alpha = 0.6f) else Brand.SlateHi, shape)
+
+/** A recessed well that groups controls. */
+fun Modifier.well(shape: Shape = RoundedCornerShape(14.dp)): Modifier = this
+    .clip(shape)
+    .background(Brand.Night)
+    .border(1.dp, Color.Black.copy(alpha = 0.5f), shape)
+
+fun contentColor(active: Boolean) = if (active) Color.White else Brand.Ivory.copy(alpha = 0.88f)
 
 @Composable
 fun IconChip(
@@ -71,19 +103,15 @@ fun IconChip(
     modifier: Modifier = Modifier,
     badge: Boolean = false,
     size: Dp = 40.dp,
+    tint: Color? = null,
     onClick: () -> Unit,
 ) {
-    val bg by animateColorAsState(if (active) Brand.Ember else Brand.Slate, label = "chip")
     Box(modifier.size(size)) {
         Box(
-            Modifier
-                .fillMaxSize()
-                .clip(RoundedCornerShape(12.dp))
-                .background(bg)
-                .pressScale(onClick),
+            Modifier.fillMaxSize().control(active).pressScale(onClick),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription, tint = if (active) Color.White else Brand.Ivory, modifier = Modifier.size(20.dp))
+            Icon(icon, contentDescription, tint = tint ?: contentColor(active), modifier = Modifier.size(size * 0.5f))
         }
         if (badge) {
             Box(
@@ -102,17 +130,24 @@ fun Chip(
     onClick: () -> Unit,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val bg by animateColorAsState(if (active) Brand.Ember else Brand.Slate, label = "chipbg")
     Row(
         modifier
             .height(height)
-            .clip(RoundedCornerShape(12.dp))
-            .background(bg)
+            .control(active)
             .pressScale(onClick)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         content = content,
+    )
+}
+
+/** Small status light — ivory when on, like the LED on a hardware button. */
+@Composable
+fun Led(on: Boolean, color: Color = Brand.Ivory) {
+    Box(
+        Modifier.size(6.dp).clip(CircleShape)
+            .background(if (on) color else Color.White.copy(alpha = 0.12f)),
     )
 }
 
@@ -132,17 +167,16 @@ fun Segmented(
     BoxWithConstraints(
         modifier
             .height(height)
-            .clip(RoundedCornerShape(11.dp))
-            .background(Brand.Night)
-            .border(1.dp, Brand.Line, RoundedCornerShape(11.dp))
+            .well(RoundedCornerShape(11.dp))
             .padding(3.dp),
     ) {
         val segW = maxWidth / options.size
-        val x by animateDpAsState(segW * selected.coerceAtLeast(0), spring(dampingRatio = 0.8f, stiffness = 600f), label = "seg")
+        val x by animateDpAsState(segW * selected.coerceAtLeast(0), spring(dampingRatio = 0.85f, stiffness = 700f), label = "seg")
         if (selected >= 0) {
             Box(
                 Modifier.offset(x = x).width(segW).fillMaxHeight()
-                    .clip(RoundedCornerShape(8.dp)).background(Brand.EmberGradient),
+                    .clip(RoundedCornerShape(8.dp)).background(Brand.SlateHi)
+                    .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(8.dp)),
             )
         }
         Row(Modifier.fillMaxSize()) {
@@ -163,18 +197,16 @@ fun Segmented(
 
 @Composable
 fun BreakSwitch(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
-    val x by animateDpAsState(if (checked) 20.dp else 2.dp, spring(dampingRatio = 0.7f, stiffness = 700f), label = "sw")
-    val bg by animateColorAsState(if (checked) Brand.Ember else Brand.Line, label = "swbg")
+    val x by animateDpAsState(if (checked) 20.dp else 2.dp, spring(dampingRatio = 0.75f, stiffness = 700f), label = "sw")
     Box(
         modifier
             .size(width = 44.dp, height = 26.dp)
             .clip(CircleShape)
-            .background(bg)
+            .background(if (checked) Brand.Ivory else Brand.Night)
+            .border(1.dp, if (checked) Color.Transparent else Brand.Line, CircleShape)
             .clickable { onChange(!checked) },
     ) {
-        Box(
-            Modifier.offset(x = x, y = 3.dp).size(20.dp).clip(CircleShape).background(Color.White),
-        )
+        Box(Modifier.offset(x = x, y = 3.dp).size(20.dp).clip(CircleShape).background(if (checked) Brand.Obsidian else Brand.Mist))
     }
 }
 
@@ -185,10 +217,7 @@ fun SettingRow(
     modifier: Modifier = Modifier,
     trailing: @Composable () -> Unit,
 ) {
-    Row(
-        modifier.fillMaxWidth().padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    Row(modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(end = 12.dp)) {
             Text(title, style = Type.Heading, color = Brand.Ivory)
             if (subtitle != null) Text(subtitle, style = Type.Body, color = Brand.Mist, modifier = Modifier.padding(top = 2.dp))
@@ -215,7 +244,7 @@ fun SliderRow(
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = Type.Heading, color = Brand.Ivory, modifier = Modifier.weight(1f))
-            Text(valueText, style = Type.Mono, color = Brand.EmberHi)
+            Text(valueText, style = Type.Mono, color = Brand.Mist)
         }
         Slider(
             value = value,
@@ -225,7 +254,7 @@ fun SliderRow(
             steps = steps,
             colors = SliderDefaults.colors(
                 thumbColor = Brand.Ivory,
-                activeTrackColor = Brand.Ember,
+                activeTrackColor = Brand.Ivory,
                 inactiveTrackColor = Brand.Line,
                 activeTickColor = Color.Transparent,
                 inactiveTickColor = Color.Transparent,
@@ -236,22 +265,23 @@ fun SliderRow(
 }
 
 @Composable
-fun Stepper(text: String, onMinus: () -> Unit, onPlus: () -> Unit, modifier: Modifier = Modifier, minWidth: Dp = 44.dp) {
-    Row(
-        modifier.height(40.dp).clip(RoundedCornerShape(12.dp)).background(Brand.Slate),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+fun Stepper(text: String, onMinus: () -> Unit, onPlus: () -> Unit, modifier: Modifier = Modifier, minWidth: Dp = 44.dp, label: String? = null) {
+    Row(modifier.height(40.dp).well(RoundedCornerShape(12.dp)), verticalAlignment = Alignment.CenterVertically) {
         StepButton("−", onMinus)
-        Text(text, style = Type.Mono, color = Brand.Ivory, textAlign = TextAlign.Center, modifier = Modifier.width(minWidth))
+        Column(Modifier.width(minWidth), horizontalAlignment = Alignment.CenterHorizontally) {
+            if (label != null) Text(label, style = Type.Caption.copy(fontSize = Type.Caption.fontSize * 0.8f), color = Brand.Dim, maxLines = 1)
+            Text(text, style = Type.Mono, color = Brand.Ivory, textAlign = TextAlign.Center)
+        }
         StepButton("+", onPlus)
     }
 }
 
 @Composable
 private fun StepButton(sym: String, onClick: () -> Unit) {
-    Box(Modifier.size(width = 34.dp, height = 40.dp).pressScale(onClick, pressedScale = 0.85f), contentAlignment = Alignment.Center) {
-        Text(sym, style = Type.Title, color = Brand.Ivory)
-    }
+    Box(
+        Modifier.padding(3.dp).size(width = 32.dp, height = 34.dp).control(false, RoundedCornerShape(9.dp)).pressScale(onClick, pressedScale = 0.88f),
+        contentAlignment = Alignment.Center,
+    ) { Text(sym, style = Type.Title, color = Brand.Ivory) }
 }
 
 @Composable
@@ -260,24 +290,23 @@ fun PrimaryButton(text: String, modifier: Modifier = Modifier, icon: ImageVector
         modifier
             .height(46.dp)
             .clip(RoundedCornerShape(14.dp))
-            .background(Brand.EmberGradient)
+            .background(Brand.Ivory)
             .pressScale(onClick)
             .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        if (icon != null) { Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)) }
-        Text(text, style = Type.Heading, color = Color.White)
+        if (icon != null) { Icon(icon, null, tint = Brand.Obsidian, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)) }
+        Text(text, style = Type.Heading, color = Brand.Obsidian)
     }
 }
 
 @Composable
-fun GhostButton(text: String, modifier: Modifier = Modifier, icon: ImageVector? = null, onClick: () -> Unit) {
+fun GhostButton(text: String, modifier: Modifier = Modifier, icon: ImageVector? = null, active: Boolean = false, onClick: () -> Unit) {
     Row(
         modifier
             .height(46.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Brand.Slate)
+            .control(active, RoundedCornerShape(14.dp))
             .pressScale(onClick)
             .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -286,6 +315,15 @@ fun GhostButton(text: String, modifier: Modifier = Modifier, icon: ImageVector? 
         if (icon != null) { Icon(icon, null, tint = Brand.Ivory, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)) }
         Text(text, style = Type.Heading, color = Brand.Ivory)
     }
+}
+
+/** Big round transport button (play / stop / record). */
+@Composable
+fun RoundButton(icon: ImageVector, active: Boolean, size: Dp = 56.dp, tint: Color? = null, contentDescription: String? = null, onClick: () -> Unit) {
+    Box(
+        Modifier.size(size).control(active, CircleShape).pressScale(onClick, pressedScale = 0.9f),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, contentDescription, tint = tint ?: contentColor(active), modifier = Modifier.size(size * 0.48f)) }
 }
 
 /** Right-side sheet that floats over the keyboard; the visible keys stay playable. */
@@ -303,7 +341,7 @@ fun SidePanel(
         modifier
             .fillMaxHeight()
             .clip(RoundedCornerShape(topStart = 22.dp, bottomStart = 22.dp))
-            .background(Brush.verticalGradient(listOf(Color(0xFF1A1A21), Color(0xFF121217))))
+            .background(Brand.Graphite)
             .border(1.dp, Brand.Line, RoundedCornerShape(topStart = 22.dp, bottomStart = 22.dp))
             .clickable(remember { MutableInteractionSource() }, indication = null) { /* swallow touches */ },
     ) {
@@ -331,6 +369,51 @@ fun SidePanel(
     }
 }
 
+/**
+ * Large centered window with room to breathe. Tapping the dimmed area outside closes it.
+ */
+@Composable
+fun BigModal(
+    title: String,
+    subtitle: String?,
+    onClose: () -> Unit,
+    headerExtra: (@Composable RowScope.() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))
+            .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onClose),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth(0.95f)
+                .widthIn(max = 1180.dp)
+                .fillMaxHeight(0.94f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Brand.Graphite)
+                .border(1.dp, Brand.Line, RoundedCornerShape(24.dp))
+                .clickable(remember { MutableInteractionSource() }, indication = null) {},
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 22.dp, end = 14.dp, top = 14.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.widthIn(min = 140.dp)) {
+                    Text(title, style = Type.Title, color = Brand.Ivory)
+                    if (subtitle != null) Text(subtitle, style = Type.Body, color = Brand.Mist, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.width(16.dp))
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) { headerExtra?.invoke(this) }
+                Spacer(Modifier.width(10.dp))
+                IconChip(Icons.Rounded.Close, "Close", size = 38.dp, onClick = onClose)
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Brand.Line))
+            Column(Modifier.fillMaxWidth().weight(1f), content = content)
+        }
+    }
+}
+
 @Composable
 fun Card(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(
@@ -343,3 +426,13 @@ fun Card(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> U
         content = content,
     )
 }
+
+@Composable
+fun ProgressLine(progress: Float, modifier: Modifier = Modifier, color: Color = Brand.Ivory) {
+    Box(modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(Brand.Line)) {
+        Box(Modifier.fillMaxWidth(progress.coerceIn(0f, 1f)).fillMaxHeight().clip(CircleShape).background(color))
+    }
+}
+
+@Composable
+fun Centered(content: @Composable BoxScope.() -> Unit) = Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center, content = content)

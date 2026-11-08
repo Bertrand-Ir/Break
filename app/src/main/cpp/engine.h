@@ -26,8 +26,16 @@ constexpr int PATTERN_BAR = 4 * PPQ;
 
 enum CmdType : uint8_t {
     C_NOTE_ON, C_NOTE_OFF, C_ALL_OFF, C_SUSTAIN, C_PRESET, C_LAYER, C_TUNING,
-    C_BEAT_PLAY, C_BEAT_STOP, C_PANIC
+    C_BEAT_PLAY, C_BEAT_STOP, C_PANIC,
+    C_PREVIEW_PRESET, C_PREVIEW_NOTE, C_PREVIEW_STOP,
+    C_LOOP
 };
+
+// Looper states (also reported to the UI)
+enum LoopState : int {
+    L_EMPTY = 0, L_ARMED = 1, L_REC = 2, L_PLAY = 3, L_DUB = 4, L_STOP = 5, L_ARMPLAY = 6
+};
+enum LoopAction : int { LA_MAIN = 0, LA_STOP = 1, LA_CLEAR = 2 };
 
 struct Cmd {
     CmdType type;
@@ -103,6 +111,8 @@ public:
     int readRecording(int16_t *dst, int max) { return recRing_.pop(dst, max); }
     int sampleRate() const { return sampleRate_; }
     double latencyMs();
+    /** Allocates the loop buffer (control thread, once). */
+    void prepareLooper(int seconds);
 
     // ── parameters (lock-free) ──
     std::atomic<float> keysVol{0.9f}, beatVol{0.8f}, userVol{0.85f}, metroVol{0.7f}, masterVol{1.f};
@@ -118,12 +128,15 @@ public:
     std::atomic<bool> userPlaying{false}, userLoop{true};
     std::atomic<float> userSeek{-1.f};
     std::atomic<bool> recording{false};
+    std::atomic<float> loopVol{0.9f};
 
     // ── status for the UI ──
     std::atomic<int> uiBeat{-1};
     std::atomic<float> uiUserPos{0.f};
     std::atomic<float> uiLevel{0.f};
     std::atomic<bool> uiBeatPlaying{false};
+    std::atomic<int> uiLoopState{L_EMPTY};
+    std::atomic<float> uiLoopPos{0.f}, uiLoopLenSec{0.f}, uiLoopRecSec{0.f};
 
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream *s, void *data, int32_t frames) override;
     void onErrorAfterClose(oboe::AudioStream *s, oboe::Result r) override;
@@ -138,6 +151,8 @@ private:
     void triggerEvent(const PatternEvent &e, double framesPerTick);
     void scheduleOff(int ch, int note, int64_t atFrame);
     void processOffs();
+    void loopAction(int action);
+    void finishLoopRecording(bool thenPlay);
 
     std::shared_ptr<oboe::AudioStream> stream_;
     std::mutex streamLock_;
@@ -173,6 +188,18 @@ private:
     std::atomic<UserTrack *> retiredTrack_{nullptr};
     std::atomic<bool> clearTrack_{false};
     double trackPos_ = 0.0;
+
+    // looper (buffer owned forever once allocated; audio thread owns the state)
+    std::atomic<int16_t *> loopData_{nullptr};
+    int64_t loopCap_ = 0;
+    int loopState_ = L_EMPTY;
+    int64_t loopLen_ = 0, loopPos_ = 0, loopRec_ = 0, loopTarget_ = -1;
+    bool loopThenPlay_ = true;
+    float gLoop_ = 0.9f;
+    // transport facts for the looper (set by transportStep each sub-block)
+    bool transportOn_ = false;
+    int barCross_ = -1;          // frame offset of a bar start inside this sub-block, or -1
+    double framesPerBar_ = 0.0;
 
     Bass808 bass_;
     Click click_;

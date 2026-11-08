@@ -22,6 +22,7 @@ Engine::~Engine() {
     delete track_;
     delete pendingTrack_.exchange(nullptr);
     delete building_;
+    delete[] loopData_.exchange(nullptr);
     if (beat_) tsf_close(beat_);
     if (keys_) tsf_close(keys_);
 }
@@ -47,6 +48,7 @@ bool Engine::load(AAssetManager *am, const char *assetName) {
     tsf_channel_set_bank_preset(keys_, 0, 0, 0);
     tsf_channel_set_bank_preset(keys_, 1, 0, 48);
     tsf_channel_set_volume(keys_, 1, layerMix.load());
+    tsf_channel_set_bank_preset(keys_, 2, 0, 0);   // instrument preview channel
     tsf_channel_set_bank_preset(beat_, 9, 128, 0);
     tsf_channel_set_presetnumber(beat_, 1, 33, 0);
 
@@ -127,7 +129,21 @@ void Engine::stop() {
     beatActive_ = false; running_ = false; tick_ = 0.0;
     userPlaying = false; uiBeatPlaying = false; uiBeat = -1;
     bass_.kill();
+    // Looper: a take in progress is kept, playback pauses.
+    if (loopState_ == L_REC) { loopLen_ = loopRec_; loopPos_ = 0; loopState_ = loopLen_ > sampleRate_ / 10 ? L_STOP : L_EMPTY; }
+    else if (loopState_ == L_PLAY || loopState_ == L_DUB || loopState_ == L_ARMPLAY) loopState_ = L_STOP;
+    else if (loopState_ == L_ARMED) loopState_ = L_EMPTY;
+    loopTarget_ = -1;
+    uiLoopState = loopState_;
     Cmd c; while (cmds_.pop(c)) {}
+}
+
+void Engine::prepareLooper(int seconds) {
+    if (loopData_.load(std::memory_order_acquire)) return;
+    const int64_t frames = (int64_t) seconds * std::max(sampleRate_, 48000);
+    auto *buf = new int16_t[frames * 2]();
+    loopCap_ = frames;
+    loopData_.store(buf, std::memory_order_release);
 }
 
 void Engine::onErrorAfterClose(oboe::AudioStream *, oboe::Result r) {
@@ -243,6 +259,22 @@ void Engine::drainCommands() {
             case C_TUNING:
                 tsf_channel_set_tuning(keys_, 0, c.f);
                 tsf_channel_set_tuning(keys_, 1, c.f);
+                tsf_channel_set_tuning(keys_, 2, c.f);
+                break;
+            case C_PREVIEW_PRESET:
+                tsf_channel_sounds_off_all(keys_, 2);
+                if (!tsf_channel_set_bank_preset(keys_, 2, c.a, c.b))
+                    tsf_channel_set_presetnumber(keys_, 2, c.b, 0);
+                break;
+            case C_PREVIEW_NOTE:
+                if (c.f > 0.f) tsf_channel_note_on(keys_, 2, c.a & 127, c.f);
+                else tsf_channel_note_off(keys_, 2, c.a & 127);
+                break;
+            case C_PREVIEW_STOP:
+                tsf_channel_note_off_all(keys_, 2);
+                break;
+            case C_LOOP:
+                loopAction(c.a);
                 break;
             case C_BEAT_PLAY: {
                 const int num = std::max(1, tsNum.load());
@@ -272,6 +304,7 @@ void Engine::drainCommands() {
             case C_PANIC:
                 tsf_channel_sounds_off_all(keys_, 0);
                 tsf_channel_sounds_off_all(keys_, 1);
+                tsf_channel_sounds_off_all(keys_, 2);
                 tsf_channel_sounds_off_all(beat_, 9);
                 tsf_channel_sounds_off_all(beat_, 1);
                 bass_.kill();
@@ -334,9 +367,62 @@ void Engine::triggerEvent(const PatternEvent &e, double fpt) {
     }
 }
 
+// ── Looper ───────────────────────────────────────────────────────────────────
+// One button drives it: record → (tap) loop plays → (tap) overdub → (tap) play …
+// With a beat or metronome running, takes start on the next bar and are rounded to whole bars,
+// so the loop stays locked to the groove.
+void Engine::finishLoopRecording(bool thenPlay) {
+    if (transportOn_ && framesPerBar_ > 1.0) {
+        const int64_t bars = std::max<int64_t>(1, std::llround(loopRec_ / framesPerBar_));
+        const int64_t target = std::min<int64_t>(loopCap_, (int64_t) (bars * framesPerBar_));
+        if (loopRec_ >= target) {
+            loopLen_ = target;
+            loopPos_ = (loopRec_ - target) % std::max<int64_t>(1, target);
+            loopState_ = thenPlay ? L_PLAY : L_STOP;
+        } else {
+            loopTarget_ = target;          // keep recording until the bar line
+            loopThenPlay_ = thenPlay;
+        }
+        return;
+    }
+    loopLen_ = loopRec_;
+    loopPos_ = 0;
+    loopState_ = loopLen_ > sampleRate_ / 10 ? (thenPlay ? L_PLAY : L_STOP) : L_EMPTY;
+}
+
+void Engine::loopAction(int action) {
+    if (!loopData_.load(std::memory_order_acquire)) return;
+    if (action == LA_CLEAR) {
+        loopState_ = L_EMPTY; loopLen_ = loopPos_ = loopRec_ = 0; loopTarget_ = -1;
+        return;
+    }
+    const bool stopKey = action == LA_STOP;
+    switch (loopState_) {
+        case L_EMPTY:
+            if (stopKey) break;
+            if (transportOn_) loopState_ = L_ARMED;
+            else { loopState_ = L_REC; loopRec_ = 0; }
+            break;
+        case L_ARMED: loopState_ = L_EMPTY; break;
+        case L_REC:
+            if (loopTarget_ < 0) finishLoopRecording(!stopKey);
+            else loopThenPlay_ = !stopKey;
+            break;
+        case L_PLAY: loopState_ = stopKey ? L_STOP : L_DUB; break;
+        case L_DUB: loopState_ = stopKey ? L_STOP : L_PLAY; break;
+        case L_STOP:
+            if (transportOn_) loopState_ = L_ARMPLAY;
+            else { loopState_ = L_PLAY; loopPos_ = 0; }
+            break;
+        case L_ARMPLAY: loopState_ = L_STOP; break;
+    }
+}
+
 void Engine::transportStep(int n) {
     const bool metro = metroOn.load(std::memory_order_relaxed);
+    barCross_ = -1;
     if (!metro && !beatActive_) {
+        transportOn_ = false;
         running_ = false;
         tick_ = 0.0;
         uiBeat.store(-1, std::memory_order_relaxed);
@@ -357,6 +443,7 @@ void Engine::transportStep(int n) {
     const double tpf = bpm.load(std::memory_order_relaxed) * PPQ / (60.0 * sampleRate_);
     const double fpt = 1.0 / tpf;
     const double t0 = tick_, t1 = t0 + n * tpf;
+    transportOn_ = true;
 
     // ── pattern swap, quantized to the next bar so style changes land on the one ──
     if (pendingPattern_.load(std::memory_order_acquire) && !retiredPattern_.load(std::memory_order_acquire)) {
@@ -386,6 +473,12 @@ void Engine::transportStep(int n) {
     const int num = std::max(1, tsNum.load(std::memory_order_relaxed));
     const int den = std::max(1, tsDen.load(std::memory_order_relaxed));
     const double clickT = PPQ * 4.0 / den;
+    {   // where does the next bar start? (the looper locks to it)
+        const double barT = num * clickT;
+        framesPerBar_ = barT * fpt;
+        const double nb = std::ceil(t0 / barT) * barT;
+        if (nb < t1) barCross_ = std::min(n - 1, std::max(0, (int) ((nb - t0) * fpt)));
+    }
     const bool countingIn = beatActive_ && countIn_ && t0 < beatStart_;
     if (metro || countingIn) {
         click_.setType(metroSound.load(std::memory_order_relaxed));
@@ -445,6 +538,11 @@ void Engine::renderSub(float *out, int n) {
         uGain = (smart ? tr->gain : 1.f) * gUser_ * (1.f / 32768.f);
     }
     const bool loop = userLoop.load(std::memory_order_relaxed);
+    gLoop_ += (loopVol.load(std::memory_order_relaxed) - gLoop_) * smooth_;
+    int16_t *lbuf = loopData_.load(std::memory_order_acquire);
+    if (!lbuf) loopState_ = L_EMPTY;
+    if (loopState_ == L_ARMED && !transportOn_) { loopState_ = L_REC; loopRec_ = 0; }
+    if (loopState_ == L_ARMPLAY && !transportOn_) { loopState_ = L_PLAY; loopPos_ = 0; }
     const bool rec = recording.load(std::memory_order_relaxed);
 
     for (int i = 0; i < n; i++) {
@@ -458,6 +556,39 @@ void Engine::renderSub(float *out, int n) {
         reverb_.process(kl, kr, rl, rr);
         kl += rl * gRev_;
         kr += rr * gRev_;
+
+        // ── looper: records the keys (with reverb), plays back underneath ──
+        float ll = 0.f, lr = 0.f;
+        if (loopState_ != L_EMPTY) {
+            if (i == barCross_) {
+                if (loopState_ == L_ARMED) { loopState_ = L_REC; loopRec_ = 0; }
+                else if (loopState_ == L_ARMPLAY) { loopState_ = L_PLAY; loopPos_ = 0; }
+            }
+            if (loopState_ == L_REC) {
+                if (loopRec_ < loopCap_) {
+                    lbuf[2 * loopRec_] = (int16_t) (std::clamp(kl, -1.f, 1.f) * 32767.f);
+                    lbuf[2 * loopRec_ + 1] = (int16_t) (std::clamp(kr, -1.f, 1.f) * 32767.f);
+                    loopRec_++;
+                }
+                if (loopTarget_ > 0 && loopRec_ >= loopTarget_) {
+                    loopLen_ = loopTarget_; loopPos_ = 0; loopTarget_ = -1;
+                    loopState_ = loopThenPlay_ ? L_PLAY : L_STOP;
+                } else if (loopRec_ >= loopCap_) {
+                    loopTarget_ = -1;
+                    loopLen_ = loopRec_; loopPos_ = 0; loopState_ = L_PLAY;
+                }
+            } else if ((loopState_ == L_PLAY || loopState_ == L_DUB) && loopLen_ > 0) {
+                int16_t *f = &lbuf[2 * loopPos_];
+                ll = f[0] * (1.f / 32768.f);
+                lr = f[1] * (1.f / 32768.f);
+                if (loopState_ == L_DUB) {
+                    f[0] = (int16_t) (std::clamp(ll + kl, -1.f, 1.f) * 32767.f);
+                    f[1] = (int16_t) (std::clamp(lr + kr, -1.f, 1.f) * 32767.f);
+                }
+                ll *= gLoop_; lr *= gLoop_;
+                if (++loopPos_ >= loopLen_) loopPos_ = 0;
+            }
+        }
 
         const float b8 = bass_.process() * 0.6f;
         const float bl = (beatBuf_[2 * i] + b8) * gBeat_;
@@ -483,8 +614,8 @@ void Engine::renderSub(float *out, int n) {
         const float duck = smart ? 1.f - std::min(0.32f, duckEnv_ * 0.75f) : 1.f;
         const float m = click_.process() * gMetro_ * 0.55f;
 
-        float L = (kl + (bl + ul) * duck + m) * gMaster_;
-        float R = (kr + (br + ur) * duck + m) * gMaster_;
+        float L = (kl + ll + (bl + ul) * duck + m) * gMaster_;
+        float R = (kr + lr + (br + ur) * duck + m) * gMaster_;
 
         // Peak limiter: instant attack, smooth release, -1 dBFS ceiling.
         const float pk = std::max(std::fabs(L), std::fabs(R));
@@ -505,6 +636,10 @@ void Engine::renderSub(float *out, int n) {
             recRing_.push((int16_t) (R * 32767.f));
         }
     }
+    uiLoopState.store(loopState_, std::memory_order_relaxed);
+    if (loopLen_ > 0) uiLoopPos.store((float) loopPos_ / (float) loopLen_, std::memory_order_relaxed);
+    uiLoopLenSec.store((float) loopLen_ / sampleRate_, std::memory_order_relaxed);
+    uiLoopRecSec.store((float) loopRec_ / sampleRate_, std::memory_order_relaxed);
     if (tr) uiUserPos.store((float) (trackPos_ / std::max(1, tr->frames)), std::memory_order_relaxed);
     frameClock_ += n;
 }

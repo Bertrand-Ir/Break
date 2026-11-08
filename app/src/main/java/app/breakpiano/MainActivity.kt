@@ -17,6 +17,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import app.breakpiano.audio.BeatLibrary
 import app.breakpiano.audio.NativeEngine
+import app.breakpiano.audio.Previewer
 import app.breakpiano.audio.Recorder
 import app.breakpiano.audio.Take
 import app.breakpiano.audio.UserBeat
@@ -35,6 +36,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var beats: BeatLibrary
     private lateinit var recorder: Recorder
     private lateinit var updater: Updater
+    private lateinit var previewer: Previewer
     private val model = KeyboardModel()
 
     private var ready by mutableStateOf(false)
@@ -58,6 +60,7 @@ class MainActivity : ComponentActivity() {
         beats = BeatLibrary(this)
         recorder = Recorder(this, lifecycleScope)
         updater = Updater(applicationContext, lifecycleScope)
+        previewer = Previewer(lifecycleScope)
 
         lifecycleScope.launch {
             val ok = withContext(Dispatchers.Default) { NativeEngine.load(assets, NativeEngine.SOUNDFONT) }
@@ -78,6 +81,7 @@ class MainActivity : ComponentActivity() {
                     userBeats = beats.beats,
                     recorder = recorder,
                     updater = updater,
+                    previewer = previewer,
                     ready = ready,
                     importProgress = importProgress,
                     onImport = { pickAudio.launch(arrayOf("audio/*")) },
@@ -113,6 +117,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         recorder.stop()
         recorder.stopPlayback()
+        previewer.stop()
         model.releaseAll()
         if (loaded) NativeEngine.stop()
         state.onEngineStopped()
@@ -134,6 +139,7 @@ class MainActivity : ComponentActivity() {
 
     private fun importBeat(uri: Uri) = lifecycleScope.launch {
         importProgress = 0f
+        state.beatsTab = 1   // show it in My beats
         try {
             val beat = beats.import(uri) { p -> runOnUiThread { importProgress = p } }
             state.toast = "“${beat.name}” is ready"

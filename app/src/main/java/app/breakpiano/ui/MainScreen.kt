@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import app.breakpiano.audio.NativeEngine
+import app.breakpiano.audio.Previewer
 import app.breakpiano.audio.Recorder
 import app.breakpiano.audio.Take
 import app.breakpiano.audio.UserBeat
@@ -64,6 +65,7 @@ fun MainScreen(
     userBeats: List<UserBeat>,
     recorder: Recorder,
     updater: Updater,
+    previewer: Previewer,
     ready: Boolean,
     importProgress: Float?,
     onImport: () -> Unit,
@@ -103,7 +105,7 @@ fun MainScreen(
                     .weight(1f)
                     .padding(start = 6.dp, end = 6.dp, bottom = 6.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Brush.verticalGradient(listOf(Color(0xFF1C1C23), Color(0xFF0E0E12), Color(0xFF09090B))))
+                    .background(Color(0xFF111115))
                     .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(16.dp)),
             ) {
                 // glossy lacquer reflection along the top of the case
@@ -124,22 +126,33 @@ fun MainScreen(
         }
 
         // ── side panels (non-modal: visible keys stay playable) ──
-        val sidePanel = state.panel.takeIf { it in setOf(Panel.Instruments, Panel.Beats, Panel.Metronome, Panel.Recordings) }
+        val sidePanel = state.panel.takeIf { it == Panel.Metronome || it == Panel.Recordings }
+        val barH = if (state.dualKeyboard) TopBarOneRowHeight else TopBarTwoRowHeight
         AnimatedVisibility(
             visible = sidePanel != null,
             enter = slideInHorizontally(spring(dampingRatio = 0.86f, stiffness = 520f)) { it } + fadeIn(),
             exit = slideOutHorizontally(tween(200)) { it } + fadeOut(tween(200)),
-            modifier = Modifier.align(Alignment.TopEnd).padding(top = 58.dp, bottom = 6.dp).width(panelWidth),
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = barH, bottom = 6.dp).width(panelWidth),
         ) {
             when (sidePanel ?: lastSide) {
-                Panel.Instruments -> InstrumentPanel(state)
-                Panel.Beats -> BeatsPanel(state, userBeats, importProgress, onImport, onPlayUserBeat, onDeleteUserBeat)
                 Panel.Metronome -> MetronomePanel(state)
                 Panel.Recordings -> RecordingsPanel(state, recorder, onShare)
                 else -> {}
             }
             if (sidePanel != null) lastSide = sidePanel
         }
+
+        // ── big windows ──
+        AnimatedVisibility(
+            visible = state.panel == Panel.Instruments,
+            enter = fadeIn(tween(160)) + scaleIn(initialScale = 0.97f),
+            exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.97f),
+        ) { InstrumentsModal(state, previewer) }
+        AnimatedVisibility(
+            visible = state.panel == Panel.Beats,
+            enter = fadeIn(tween(160)) + scaleIn(initialScale = 0.97f),
+            exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.97f),
+        ) { BeatsModal(state, userBeats, importProgress, onImport, onPlayUserBeat, onDeleteUserBeat) }
 
         AnimatedVisibility(
             visible = state.panel == Panel.Settings,
@@ -175,7 +188,7 @@ fun MainScreen(
 }
 
 // Remember the last panel / toast so exit animations keep their content.
-private var lastSide: Panel = Panel.Instruments
+private var lastSide: Panel = Panel.Metronome
 private var lastToast: String = ""
 
 @Composable
@@ -184,7 +197,7 @@ private fun LoadingVeil() {
     val breathe by t.animateFloat(0.94f, 1.04f, infiniteRepeatable(tween(1100), RepeatMode.Reverse), label = "b")
     val dots by t.animateFloat(0f, 3.99f, infiniteRepeatable(tween(1400)), label = "d")
     Box(
-        Modifier.fillMaxSize().background(Brush.radialGradient(listOf(Color(0xFF1B1418), Brand.Obsidian), radius = 1400f)),
+        Modifier.fillMaxSize().background(Brand.Obsidian),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {

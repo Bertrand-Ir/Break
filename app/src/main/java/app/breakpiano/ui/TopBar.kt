@@ -1,13 +1,12 @@
 package app.breakpiano.ui
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -21,12 +20,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AllInclusive
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FiberManualRecord
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Loop
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tune
@@ -36,28 +38,38 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.breakpiano.audio.Beats
-import app.breakpiano.audio.Instrument
+import app.breakpiano.audio.NativeEngine
 import app.breakpiano.audio.Recorder
 import app.breakpiano.data.BreakState
 import app.breakpiano.data.Panel
-import app.breakpiano.ui.components.Chip
 import app.breakpiano.ui.components.IconChip
+import app.breakpiano.ui.components.Led
 import app.breakpiano.ui.components.Stepper
+import app.breakpiano.ui.components.contentColor
+import app.breakpiano.ui.components.control
 import app.breakpiano.ui.components.pressScale
+import app.breakpiano.ui.components.well
 import app.breakpiano.ui.theme.Brand
 import app.breakpiano.ui.theme.Type
 
+val TopBarTwoRowHeight = 108.dp
+val TopBarOneRowHeight = 58.dp
+
+/**
+ * Two rows for room — sound on top, performance underneath. In dual-keyboard mode it folds into
+ * a single horizontally scrollable row so the keys get the height.
+ */
 @Composable
 fun TopBar(
     state: BreakState,
@@ -66,163 +78,239 @@ fun TopBar(
     updateBadge: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    BoxWithConstraints(modifier.fillMaxWidth().height(58.dp).padding(horizontal = 12.dp, vertical = 8.dp)) {
-        val compact = maxWidth < 760.dp
-        val tight = maxWidth < 640.dp
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (compact) BreakMark(26.dp) else BreakWordmark(markSize = 24.dp, fontSize = 21.sp)
-            Spacer(Modifier.width(2.dp))
-            InstrumentChip(state.instrument, state.layer, active = state.panel == Panel.Instruments, compact = tight) {
-                state.panel = if (state.panel == Panel.Instruments) Panel.None else Panel.Instruments
+    val toggle: (Panel) -> Unit = { p -> state.panel = if (state.panel == p) Panel.None else p }
+    if (state.dualKeyboard) {
+        Row(
+            modifier.fillMaxWidth().height(TopBarOneRowHeight).horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            BreakMark(26.dp)
+            InstrumentButton(state, compact = true) { toggle(Panel.Instruments) }
+            TransposeControl(state)
+            SustainButton(state, showLabel = false)
+            MetronomeGroup(state) { toggle(Panel.Metronome) }
+            BeatGroup(state, userBeatName, compact = true) { toggle(Panel.Beats) }
+            LooperGroup(state)
+            RecorderGroup(recorder) { toggle(Panel.Recordings) }
+            IconChip(Icons.Rounded.Tune, "Settings", active = state.panel == Panel.Settings, badge = updateBadge) { toggle(Panel.Settings) }
+        }
+        return
+    }
+    BoxWithConstraints(modifier.fillMaxWidth().height(TopBarTwoRowHeight).padding(horizontal = 12.dp, vertical = 7.dp)) {
+        val compact = maxWidth < 720.dp
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (compact) BreakMark(26.dp) else BreakWordmark(markSize = 24.dp, fontSize = 21.sp)
+                Spacer(Modifier.width(4.dp))
+                InstrumentButton(state, compact = compact) { toggle(Panel.Instruments) }
+                Spacer(Modifier.weight(1f))
+                TransposeControl(state)
+                SustainButton(state, showLabel = true)
+                IconChip(Icons.Rounded.Tune, "Settings", active = state.panel == Panel.Settings, badge = updateBadge, size = 44.dp) { toggle(Panel.Settings) }
             }
-            Spacer(Modifier.weight(1f))
-
-            // Transpose
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Stepper(
-                    text = if (state.transpose == 0) "0" else "%+d".format(state.transpose),
-                    onMinus = { state.transpose = (state.transpose - 1).coerceAtLeast(-12) },
-                    onPlus = { state.transpose = (state.transpose + 1).coerceAtMost(12) },
-                    minWidth = 34.dp,
-                    modifier = Modifier.height(40.dp),
-                )
-            }
-
-            // Sustain
-            Chip(active = state.sustain, onClick = { state.toggleSustain() }) {
-                Icon(Icons.Rounded.AllInclusive, "Sustain", tint = if (state.sustain) Color.White else Brand.Ivory, modifier = Modifier.size(18.dp))
-                if (!compact) Text("Sustain", style = Type.Label, color = if (state.sustain) Color.White else Brand.Ivory)
-            }
-
-            // Metronome
-            SplitChip(
-                active = state.metronomeOn,
-                onToggle = { state.toggleMetronome() },
-                onOpen = { state.panel = if (state.panel == Panel.Metronome) Panel.None else Panel.Metronome },
-                icon = { MetronomeGlyph(state.metronomeOn) },
+            Row(
+                Modifier.fillMaxWidth().height(44.dp).horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("${state.bpm}", style = Type.Mono, color = Brand.Ivory)
-                    BeatDots(state.beatStatus, running = state.metronomeOn || state.beatPlaying)
-                }
-            }
-
-            // Beats
-            val beatActive = state.beatPlaying || state.userTrackPlaying
-            SplitChip(
-                active = beatActive,
-                onToggle = {
-                    when {
-                        state.userTrackPlaying -> state.playUserTrack(false)
-                        state.beatPlaying -> state.stopBeat()
-                        else -> state.playBeat()
-                    }
-                },
-                onOpen = { state.panel = if (state.panel == Panel.Beats) Panel.None else Panel.Beats },
-                icon = {
-                    Icon(if (beatActive) Icons.Rounded.Stop else Icons.Rounded.PlayArrow, "Play beat",
-                        tint = if (beatActive) Color.White else Brand.Ivory, modifier = Modifier.size(20.dp))
-                },
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    EqBars(playing = beatActive)
-                    if (!tight) {
-                        Spacer(Modifier.width(6.dp))
-                        val name = if (state.userTrackPlaying && userBeatName != null) userBeatName
-                        else (Beats.byId(state.beatStyleId)?.name ?: "Beats")
-                        Text(name, style = Type.Label, color = Brand.Ivory, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = if (compact) 64.dp else 96.dp))
-                    }
-                }
-            }
-
-            // Record
-            SplitChip(
-                active = recorder.isRecording,
-                activeColor = Color(0xFFE5303F),
-                onToggle = { recorder.toggle() },
-                onOpen = { state.panel = if (state.panel == Panel.Recordings) Panel.None else Panel.Recordings },
-                icon = { RecGlyph(recorder.isRecording) },
-            ) {
-                if (recorder.isRecording) {
-                    val s = recorder.elapsedMs / 1000
-                    Text("%d:%02d".format(s / 60, s % 60), style = Type.Mono, color = Brand.Ivory)
-                } else {
-                    Icon(Icons.Rounded.LibraryMusic, "Recordings", tint = Brand.Ivory, modifier = Modifier.size(18.dp))
-                }
-            }
-
-            IconChip(Icons.Rounded.Tune, "Settings", active = state.panel == Panel.Settings, badge = updateBadge) {
-                state.panel = if (state.panel == Panel.Settings) Panel.None else Panel.Settings
+                MetronomeGroup(state) { toggle(Panel.Metronome) }
+                BeatGroup(state, userBeatName, compact = compact) { toggle(Panel.Beats) }
+                LooperGroup(state)
+                RecorderGroup(recorder) { toggle(Panel.Recordings) }
             }
         }
     }
 }
 
+// ── items ────────────────────────────────────────────────────────────────────
+
 @Composable
-private fun InstrumentChip(inst: Instrument, layer: Instrument?, active: Boolean, compact: Boolean, onClick: () -> Unit) {
-    val bg by animateColorAsState(if (active) Brand.Ember.copy(alpha = 0.18f) else Brand.Slate, label = "inst")
+private fun InstrumentButton(state: BreakState, compact: Boolean, onClick: () -> Unit) {
+    val inst = state.instrument
+    val layer = state.layer
     Row(
-        Modifier
-            .height(40.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(bg)
-            .pressScale(onClick)
-            .padding(start = 5.dp, end = 12.dp),
+        Modifier.height(44.dp).control(state.panel == Panel.Instruments).pressScale(onClick).padding(start = 6.dp, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        InstrumentTile(inst, 30.dp)
-        Spacer(Modifier.width(9.dp))
-        Column {
-            Text(inst.name, style = Type.Heading, color = Brand.Ivory, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = if (compact) 92.dp else 150.dp))
-            Text(
-                if (layer != null) "+ ${layer.name}" else inst.family.title,
-                style = Type.Caption, color = if (layer != null) Brand.EmberHi else Brand.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = if (compact) 92.dp else 150.dp),
-            )
+        Box(Modifier.size(34.dp).well(RoundedCornerShape(9.dp)), contentAlignment = Alignment.Center) {
+            InstrumentArt(artFor(inst), Brand.Ivory, Modifier.size(28.dp), weight = 3.4f)
         }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.widthIn(max = if (compact) 110.dp else 170.dp)) {
+            Text(inst.name, style = Type.Heading, color = Brand.Ivory, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(layer?.let { "+ ${it.name}" } ?: inst.family.title, style = Type.Caption, color = Brand.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(4.dp))
+        Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Brand.Mist, modifier = Modifier.size(18.dp))
     }
 }
 
 @Composable
-fun InstrumentTile(inst: Instrument, size: Dp, selected: Boolean = false) {
-    Box(
-        Modifier
-            .size(size)
-            .clip(RoundedCornerShape(size * 0.28f))
-            .background(Brush.linearGradient(listOf(inst.family.tint, inst.family.tint2))),
-        contentAlignment = Alignment.Center,
+private fun TransposeControl(state: BreakState) {
+    Stepper(
+        text = if (state.transpose == 0) "0" else "%+d".format(state.transpose),
+        onMinus = { state.transpose = (state.transpose - 1).coerceAtLeast(-12) },
+        onPlus = { state.transpose = (state.transpose + 1).coerceAtMost(12) },
+        minWidth = 54.dp,
+        label = "TRANSPOSE",
+        modifier = Modifier.height(44.dp),
+    )
+}
+
+@Composable
+private fun SustainButton(state: BreakState, showLabel: Boolean) {
+    Row(
+        Modifier.height(44.dp).control(state.sustain).pressScale({ state.toggleSustain() }).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(inst.monogram, style = Type.Mono.copy(fontSize = Type.Mono.fontSize * (size.value / 30f)), color = Color(0xFF15151A))
-        if (selected) {
-            Box(Modifier.fillMaxWidth().height(3.dp).align(Alignment.BottomCenter).background(Brand.Ember))
-        }
+        Led(state.sustain)
+        Icon(Icons.Rounded.AllInclusive, "Sustain", tint = contentColor(state.sustain), modifier = Modifier.size(18.dp))
+        if (showLabel) Text("Sustain", style = Type.Label, color = contentColor(state.sustain))
     }
 }
 
+/** A recessed tray holding a toggle on the left and a label/opener on the right. */
 @Composable
-private fun SplitChip(
+private fun Group(
     active: Boolean,
     onToggle: () -> Unit,
-    onOpen: () -> Unit,
-    activeColor: Color = Brand.Ember,
+    onOpen: (() -> Unit)?,
     icon: @Composable () -> Unit,
     label: @Composable () -> Unit,
 ) {
-    val iconBg by animateColorAsState(if (active) activeColor else Color.Transparent, label = "split")
-    Row(
-        Modifier.height(40.dp).clip(RoundedCornerShape(12.dp)).background(Brand.Slate),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    Row(Modifier.height(44.dp).well(RoundedCornerShape(13.dp)).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(38.dp).control(active, RoundedCornerShape(10.dp)).pressScale(onToggle, pressedScale = 0.9f), contentAlignment = Alignment.Center) { icon() }
         Box(
-            Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(iconBg).pressScale(onToggle, pressedScale = 0.88f),
-            contentAlignment = Alignment.Center,
-        ) { icon() }
-        Box(
-            Modifier.fillMaxHeight().pressScale(onOpen).padding(start = 8.dp, end = 11.dp),
+            Modifier.fillMaxHeight().then(if (onOpen != null) Modifier.pressScale(onOpen) else Modifier).padding(start = 9.dp, end = 10.dp),
             contentAlignment = Alignment.Center,
         ) { label() }
+    }
+}
+
+@Composable
+private fun MetronomeGroup(state: BreakState, onOpen: () -> Unit) {
+    Group(
+        active = state.metronomeOn,
+        onToggle = { state.toggleMetronome() },
+        onOpen = onOpen,
+        icon = { MetronomeGlyph(contentColor(state.metronomeOn)) },
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("${state.bpm} BPM", style = Type.Mono, color = Brand.Ivory)
+            BeatDots(state.beatStatus, running = state.metronomeOn || state.beatPlaying)
+        }
+    }
+}
+
+@Composable
+private fun BeatGroup(state: BreakState, userBeatName: String?, compact: Boolean, onOpen: () -> Unit) {
+    val active = state.beatPlaying || state.userTrackPlaying
+    Group(
+        active = active,
+        onToggle = {
+            when {
+                state.userTrackPlaying -> state.playUserTrack(false)
+                state.beatPlaying -> state.stopBeat()
+                else -> state.playBeat()
+            }
+        },
+        onOpen = onOpen,
+        icon = { Icon(if (active) Icons.Rounded.Stop else Icons.Rounded.PlayArrow, "Play beat", tint = contentColor(active), modifier = Modifier.size(20.dp)) },
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            EqBars(playing = active)
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text("BEAT", style = Type.Caption.copy(fontSize = 8.5.sp), color = Brand.Dim)
+                val name = if (state.userTrackPlaying && userBeatName != null) userBeatName else (Beats.byId(state.beatStyleId)?.name ?: "Beats")
+                Text(name, style = Type.Label, color = Brand.Ivory, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = if (compact) 84.dp else 120.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun LooperGroup(state: BreakState) {
+    val st = state.loopState
+    val blink = rememberInfiniteTransition(label = "blink").animateFloat(1f, 0.25f, infiniteRepeatable(tween(450), RepeatMode.Reverse), label = "b")
+    val b by blink
+    Row(Modifier.height(44.dp).well(RoundedCornerShape(13.dp)).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
+        // main button: record → loop → overdub → loop …
+        val active = st in 1..4 || st == 6
+        Box(
+            Modifier.size(38.dp).control(active, RoundedCornerShape(10.dp)).pressScale({ state.looper(NativeEngine.LOOP_MAIN) }, pressedScale = 0.9f),
+            contentAlignment = Alignment.Center,
+        ) {
+            when (st) {
+                1 -> Icon(Icons.Rounded.FiberManualRecord, "Waiting for the bar", tint = Brand.Rec, modifier = Modifier.size(16.dp).alpha(b))
+                2 -> Icon(Icons.Rounded.FiberManualRecord, "Recording loop", tint = Brand.Rec, modifier = Modifier.size(18.dp))
+                3, 4 -> {
+                    LoopRing(state.loopPos, if (st == 4) Brand.Rec else Brand.Ivory, Modifier.size(30.dp))
+                    Icon(Icons.Rounded.Loop, null, tint = if (st == 4) Brand.Rec else Color.White, modifier = Modifier.size(15.dp))
+                }
+                5 -> Icon(Icons.Rounded.PlayArrow, "Play loop", tint = Brand.Ivory, modifier = Modifier.size(20.dp))
+                6 -> Icon(Icons.Rounded.PlayArrow, "Waiting for the bar", tint = Brand.Ivory, modifier = Modifier.size(20.dp).alpha(b))
+                else -> Icon(Icons.Rounded.Loop, "Record a loop", tint = Brand.Ivory, modifier = Modifier.size(20.dp))
+            }
+        }
+        Column(Modifier.padding(horizontal = 9.dp).width(74.dp)) {
+            Text("LOOPER", style = Type.Caption.copy(fontSize = 8.5.sp), color = Brand.Dim)
+            val label = when (st) {
+                1, 6 -> "Next bar…"
+                2 -> "Rec %.1fs".format(state.loopRecSec)
+                3 -> "Tap: dub"
+                4 -> "Dubbing"
+                5 -> "%.1fs loop".format(state.loopLenSec)
+                else -> "Tap: record"
+            }
+            Text(label, style = Type.Label, color = if (st == 2 || st == 4) Brand.Rec else Brand.Ivory, maxLines = 1)
+        }
+        if (st != 0) {
+            val stopIcon = if (st == 5 || st == 6) Icons.Rounded.PlayArrow else Icons.Rounded.Stop
+            Box(Modifier.size(38.dp).control(false, RoundedCornerShape(10.dp)).pressScale({ state.looper(NativeEngine.LOOP_STOP) }, pressedScale = 0.9f), contentAlignment = Alignment.Center) {
+                Icon(stopIcon, if (stopIcon == Icons.Rounded.Stop) "Stop loop" else "Play loop", tint = Brand.Ivory, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(4.dp))
+            Box(Modifier.size(38.dp).control(false, RoundedCornerShape(10.dp)).pressScale({ state.looper(NativeEngine.LOOP_CLEAR) }, pressedScale = 0.9f), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Close, "Clear loop", tint = Brand.Mist, modifier = Modifier.size(17.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecorderGroup(recorder: Recorder, onOpen: () -> Unit) {
+    Group(
+        active = recorder.isRecording,
+        onToggle = { recorder.toggle() },
+        onOpen = onOpen,
+        icon = { RecGlyph(recorder.isRecording) },
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                Text("RECORD", style = Type.Caption.copy(fontSize = 8.5.sp), color = Brand.Dim)
+                if (recorder.isRecording) {
+                    val s = recorder.elapsedMs / 1000
+                    Text("%d:%02d".format(s / 60, s % 60), style = Type.Label, color = Brand.Rec)
+                } else Text("${recorder.takes.size} takes", style = Type.Label, color = Brand.Ivory)
+            }
+            Spacer(Modifier.width(6.dp))
+            Icon(Icons.Rounded.LibraryMusic, "Recordings", tint = Brand.Mist, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+// ── small glyphs ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun LoopRing(progress: Float, color: Color, modifier: Modifier) {
+    Canvas(modifier) {
+        val w = 2.2.dp.toPx()
+        drawArc(Color.White.copy(alpha = 0.12f), 0f, 360f, false, topLeft = Offset(w / 2, w / 2), size = Size(size.width - w, size.height - w), style = Stroke(w))
+        drawArc(color, -90f, 360f * progress.coerceIn(0f, 1f), false, topLeft = Offset(w / 2, w / 2), size = Size(size.width - w, size.height - w), style = Stroke(w, cap = StrokeCap.Round))
     }
 }
 
@@ -230,35 +318,25 @@ private fun SplitChip(
 private fun BeatDots(status: Int, running: Boolean) {
     val beats = if (status >= 0) ((status shr 8) and 0xff).coerceIn(1, 7) else 4
     val cur = if (status >= 0 && running) status and 0xff else -1
-    val countIn = status >= 0 && (status shr 16) and 1 == 1
-    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(top = 2.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(top = 3.dp)) {
         repeat(beats.coerceAtMost(6)) { i ->
-            val on = i == cur
-            Box(
-                Modifier.size(width = if (i == 0) 6.dp else 4.dp, height = 3.dp).clip(CircleShape)
-                    .background(
-                        when {
-                            on && countIn -> Brand.Ivory
-                            on -> if (i == 0) Brand.EmberHi else Brand.Ember
-                            else -> Brand.Line
-                        },
-                    ),
-            )
+            Canvas(Modifier.size(width = if (i == 0) 7.dp else 5.dp, height = 3.dp)) {
+                drawRoundRect(if (i == cur) Brand.Ivory else Color.White.copy(alpha = 0.14f), cornerRadius = CornerRadius(size.height))
+            }
         }
     }
 }
 
 @Composable
-private fun MetronomeGlyph(active: Boolean) {
-    val tint = if (active) Color.White else Brand.Ivory
+private fun MetronomeGlyph(tint: Color) {
     Canvas(Modifier.size(20.dp)) {
         val w = size.width; val h = size.height
         val body = androidx.compose.ui.graphics.Path().apply {
             moveTo(w * 0.36f, h * 0.08f); lineTo(w * 0.64f, h * 0.08f)
             lineTo(w * 0.86f, h * 0.92f); lineTo(w * 0.14f, h * 0.92f); close()
         }
-        drawPath(body, tint, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.8.dp.toPx(), join = androidx.compose.ui.graphics.StrokeJoin.Round))
-        drawLine(tint, Offset(w * 0.5f, h * 0.74f), Offset(w * 0.74f, h * 0.22f), 1.8.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawPath(body, tint, style = Stroke(width = 1.8.dp.toPx(), join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        drawLine(tint, Offset(w * 0.5f, h * 0.74f), Offset(w * 0.74f, h * 0.22f), 1.8.dp.toPx(), cap = StrokeCap.Round)
         drawLine(tint, Offset(w * 0.24f, h * 0.74f), Offset(w * 0.76f, h * 0.74f), 1.4.dp.toPx())
     }
 }
@@ -267,11 +345,7 @@ private fun MetronomeGlyph(active: Boolean) {
 private fun RecGlyph(recording: Boolean) {
     val t = rememberInfiniteTransition(label = "rec")
     val a by t.animateFloat(1f, 0.35f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "reca")
-    Icon(
-        Icons.Rounded.FiberManualRecord, "Record",
-        tint = if (recording) Color.White.copy(alpha = a) else Color(0xFFFF4D5E),
-        modifier = Modifier.size(18.dp),
-    )
+    Icon(Icons.Rounded.FiberManualRecord, "Record", tint = if (recording) Brand.Rec.copy(alpha = a) else Brand.Rec, modifier = Modifier.size(18.dp))
 }
 
 @Composable
@@ -285,12 +359,7 @@ private fun EqBars(playing: Boolean) {
         val bw = size.width / 7f
         bars.forEachIndexed { i, v ->
             val bh = size.height * v
-            drawRoundRect(
-                if (playing) Brand.EmberHi else Brand.Mist,
-                topLeft = Offset(i * bw * 1.9f, size.height - bh),
-                size = Size(bw, bh),
-                cornerRadius = CornerRadius(bw / 2),
-            )
+            drawRoundRect(if (playing) Brand.Ivory else Brand.Dim, Offset(i * bw * 1.9f, size.height - bh), Size(bw, bh), CornerRadius(bw / 2))
         }
     }
 }

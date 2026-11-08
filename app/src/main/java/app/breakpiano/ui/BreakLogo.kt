@@ -11,7 +11,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.translate
@@ -67,10 +66,8 @@ private val key3 = keyPath(
 fun BreakMark(size: Dp, modifier: Modifier = Modifier, mono: Color? = null) {
     Canvas(modifier.size(size)) {
         val s = this.size.minDimension / 50f
-        val ivory = mono?.let { Brush.verticalGradient(listOf(it, it)) }
-            ?: Brush.verticalGradient(listOf(Color.White, Color(0xFFE6DFD2)), startY = 30f, endY = 76f)
-        val ember = mono?.let { Brush.verticalGradient(listOf(it, it)) }
-            ?: Brush.verticalGradient(listOf(Brand.EmberHi, Brand.EmberLo), startY = 34f, endY = 80f)
+        val ivory = mono ?: Brand.Ivory
+        val ember = mono ?: Brand.Ember
         // center the 45×50 mark inside the box
         val ox = (this.size.width - 45f * s) / 2f
         val oy = (this.size.height - 50f * s) / 2f
