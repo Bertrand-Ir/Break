@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.breakpiano.BuildConfig
 import app.breakpiano.audio.NativeEngine
 import app.breakpiano.data.BreakState
@@ -271,5 +272,29 @@ private fun AboutSection() {
         Text("Synth engine — TinySoundFont by Bernhard Schelling (MIT)", style = Type.Body, color = Brand.Mist)
         Text("Audio I/O — Oboe by Google (Apache 2.0)", style = Type.Body, color = Brand.Mist)
         Text("Typeface — Manrope (OFL)", style = Type.Body, color = Brand.Mist)
+        PhotoCredits()
+    }
+}
+
+/** Attribution for the Creative Commons photos on the instrument and beat cards. */
+@Composable
+private fun PhotoCredits() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val credits = remember {
+        runCatching {
+            val arr = org.json.JSONArray(ctx.assets.open("img/credits.json").bufferedReader().readText())
+            (0 until arr.length()).map { arr.getJSONObject(it) }
+        }.getOrDefault(emptyList())
+    }
+    if (credits.isEmpty()) return
+    SectionLabel("Photo credits")
+    Text("Card photos from Wikimedia Commons, used under their Creative Commons licenses (cropped and colour-graded).",
+        style = Type.Body, color = Brand.Dim, modifier = Modifier.padding(bottom = 6.dp))
+    credits.forEach { c ->
+        Text(
+            "${c.optString("title")} — ${c.optString("creator")} · ${c.optString("license")}",
+            style = Type.Caption.copy(letterSpacing = 0.sp), color = Brand.Mist,
+            modifier = Modifier.padding(vertical = 2.dp),
+        )
     }
 }
