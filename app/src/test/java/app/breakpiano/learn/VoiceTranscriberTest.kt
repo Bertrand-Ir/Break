@@ -1,6 +1,7 @@
 package app.breakpiano.learn
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.PI
 import kotlin.math.cos
@@ -73,6 +74,9 @@ class VoiceTranscriberTest {
 
     private fun pitches(x: FloatArray) = VoiceTranscriber.transcribe(x, sr).also { notes ->
         notes.forEach { println("%.2f-%.2f %d %.2f".format(it.start, it.end, it.pitch, it.velocity)) }
+        // note by note: no little notes, nothing overlapping
+        for (n in notes) assertTrue("tiny note ${n.pitch} at ${n.start}", n.end - n.start >= 0.13f)
+        for (k in 0 until notes.size - 1) assertTrue("overlap at ${notes[k].start}", notes[k].end <= notes[k + 1].start + 1e-4f)
     }.map { it.pitch }
 
     @Test fun tanTanTan_twinkleSungSharp() {

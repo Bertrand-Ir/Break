@@ -307,7 +307,37 @@ object VoiceTranscriber {
                 clean.removeAt(k)
             } else k++
         }
-        return clean
+        return noteByNote(clean)
+    }
+
+    /**
+     * Note by note: every sung syllable is one note, and nothing much shorter than your notes is
+     * allowed to stand alone. A short scrap touching a real note becomes part of it; a short
+     * scrap on its own is removed.
+     */
+    private fun noteByNote(notes: List<SongNote>): List<SongNote> {
+        if (notes.size < 2) return notes
+        val med = notes.map { it.end - it.start }.sorted()[notes.size / 2]
+        val minLen = max(0.13f, med * 0.45f)
+        val out = notes.sortedBy { it.start }.toMutableList()
+        var i = 0
+        while (i < out.size) {
+            val n = out[i]
+            if (n.end - n.start >= minLen) { i++; continue }
+            val prev = out.getOrNull(i - 1); val next = out.getOrNull(i + 1)
+            val touchPrev = prev != null && n.start - prev.end < 0.08f
+            val touchNext = next != null && next.start - n.end < 0.08f
+            when {
+                touchPrev && (!touchNext || prev!!.end - prev.start >= next!!.end - next.start) -> {
+                    out[i - 1] = prev!!.copy(end = maxOf(prev.end, n.end)); out.removeAt(i)
+                }
+                touchNext -> { out[i + 1] = next!!.copy(start = n.start); out.removeAt(i) }
+                else -> out.removeAt(i)
+            }
+        }
+        // notes never overlap: each one ends where the next begins
+        for (k in 0 until out.size - 1) if (out[k].end > out[k + 1].start) out[k] = out[k].copy(end = out[k + 1].start)
+        return out
     }
 
     private fun splitRun(fr: List<FrameM>, pc: FloatArray, isOnset: BooleanArray, a: Int, b: Int, dt: Float, out: MutableList<Cand>) {

@@ -335,7 +335,7 @@ private fun EditSongDialog(song: Song, busy: Boolean, onSave: (String) -> Unit, 
                 .padding(20.dp),
         ) {
             Text("Edit song", style = Type.Title, color = Brand.Ivory)
-            Text("${song.sourceLabel} · ${t(song.durationMs / 1000f)} · ${song.noteCount} notes", style = Type.Body, color = Brand.Mist)
+            Text("${t(song.durationMs / 1000f)} · ${song.noteCount} notes", style = Type.Body, color = Brand.Mist)
             Spacer(Modifier.height(14.dp))
             Text("NAME", style = Type.Caption, color = Brand.Dim)
             Spacer(Modifier.height(6.dp))
@@ -353,26 +353,8 @@ private fun EditSongDialog(song: Song, busy: Boolean, onSave: (String) -> Unit, 
                 modifier = Modifier.fillMaxWidth().well(RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 12.dp)
                     .focusRequester(focus),
             )
-            if (song.isVoice) {
-                Spacer(Modifier.height(14.dp))
-                Text("CLEAN-UP", style = Type.Caption, color = Brand.Dim)
-                Spacer(Modifier.height(6.dp))
-                Segmented(listOf("Gentle", "Balanced", "Strict"), level, { level = it }, Modifier.fillMaxWidth())
-                Text(
-                    when (level) {
-                        0 -> "Keeps quick little notes — for fast or decorated singing."
-                        2 -> "Only clear, steady sung notes — removes every stray sound."
-                        else -> "Removes sniffs, breaths, beeps and background — keeps your melody."
-                    },
-                    style = Type.Body, color = Brand.Mist, modifier = Modifier.padding(top = 6.dp),
-                )
-            }
             Spacer(Modifier.height(16.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (song.hasAudio) {
-                    GhostButton(if (busy) "Detecting…" else "Detect again", Modifier.height(42.dp), icon = Icons.Rounded.Replay) { if (!busy) onRedetect(level) }
-                    Spacer(Modifier.width(8.dp))
-                }
                 GhostButton("Delete", Modifier.height(42.dp), icon = Icons.Rounded.DeleteOutline) { onDelete() }
                 Spacer(Modifier.weight(1f))
                 GhostButton("Cancel", Modifier.height(42.dp)) { onDismiss() }
