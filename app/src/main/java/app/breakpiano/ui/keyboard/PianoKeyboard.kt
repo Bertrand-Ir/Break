@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import app.breakpiano.data.BreakState
 import app.breakpiano.data.LabelMode
 import app.breakpiano.data.Notation
+import app.breakpiano.learn.Learner
 import app.breakpiano.ui.components.control
 import app.breakpiano.ui.components.pressScale
 import app.breakpiano.ui.theme.Brand
@@ -89,6 +90,7 @@ fun KeyboardRow(
     initialStart: Int,
     onStartChanged: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    learner: Learner? = null,
 ) {
     val visible = state.keysOnScreen.coerceIn(7, PianoLayout.whiteCount)
     val maxStart = (PianoLayout.whiteCount - visible).toFloat()
@@ -96,6 +98,11 @@ fun KeyboardRow(
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(visible) { anim.snapTo(anim.value.coerceIn(0f, maxStart)) }
+    // Learning mode keeps the upcoming notes on screen
+    val focus = learner?.focusStart ?: -1
+    LaunchedEffect(focus) {
+        if (focus >= 0) anim.animateTo(focus.toFloat().coerceIn(0f, maxStart), spring(stiffness = Spring.StiffnessLow, dampingRatio = 0.9f))
+    }
 
     fun settle() = scope.launch {
         val t = anim.value.roundToInt().coerceIn(0, maxStart.toInt())
@@ -123,13 +130,18 @@ fun KeyboardRow(
             onStep = { stepOctave(it) },
             modifier = Modifier.fillMaxWidth().height(30.dp).padding(horizontal = 6.dp, vertical = 4.dp),
         )
-        PianoKeys(
-            model = model,
-            state = state,
-            start = { anim.value },
-            visible = visible,
-            modifier = Modifier.fillMaxWidth().weight(1f),
-        )
+        if (learner != null && learner.active) {
+            LearnHighway(learner, state, start = { anim.value }, visible = visible, modifier = Modifier.fillMaxWidth().weight(0.46f))
+            PianoKeys(model, state, { anim.value }, visible, Modifier.fillMaxWidth().weight(0.54f), learner)
+        } else {
+            PianoKeys(
+                model = model,
+                state = state,
+                start = { anim.value },
+                visible = visible,
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            )
+        }
     }
 }
 
@@ -140,6 +152,7 @@ fun PianoKeys(
     start: () -> Float,
     visible: Int,
     modifier: Modifier = Modifier,
+    learner: Learner? = null,
 ) {
     val view = LocalView.current
     val measurer = rememberTextMeasurer(cacheSize = 192)
@@ -282,6 +295,8 @@ fun PianoKeys(
 
                 onDrawBehind {
                     @Suppress("UNUSED_VARIABLE") val v = model.version
+                    @Suppress("UNUSED_VARIABLE") val lv = learner?.version
+                    val guides = if (learner != null && learner.active) learner.guide else null
                     val s = start()
                     geo.width = w; geo.height = h; geo.start = s; geo.visible = visible
                     val mode = state.labelMode
@@ -320,6 +335,14 @@ fun PianoKeys(
                         } else {
                             drawRect(Color.White.copy(alpha = 0.6f), Offset(left, 0f), Size(dp1, h - lip - r * 0.5f))
                             drawRect(Color.Black.copy(alpha = 0.07f), Offset(left + kw - dp1 * 1.5f, 0f), Size(dp1 * 1.5f, h - lip - r * 0.5f))
+                        }
+
+                        if (guides != null && guides[note] > 0f) {
+                            val g = guides[note]
+                            val c = if (learner!!.guideHand[note] == 1) Brand.HandLeft else Brand.HandRight
+                            val top = h * 0.5f
+                            drawRect(c.copy(alpha = 0.12f + 0.38f * g), Offset(left, top), Size(kw, h - lip - top))
+                            drawRect(c.copy(alpha = 0.5f + 0.5f * g), Offset(left, h - lip - 4.dp.toPx()), Size(kw, 4.dp.toPx()))
                         }
 
                         // label
@@ -377,6 +400,11 @@ fun PianoKeys(
                             bevelPath.close()
                             drawPath(bevelPath, if (pressed) bevelP else bevelN)
                             drawLine(Color.White.copy(alpha = if (pressed) 0.08f else 0.16f), Offset(inset, bh - bev), Offset(bw - inset, bh - bev), dp1)
+                            if (guides != null && guides[bn] > 0f) {
+                                val g = guides[bn]
+                                val c = if (learner!!.guideHand[bn] == 1) Brand.HandLeft else Brand.HandRight
+                                drawRoundRect(c.copy(alpha = 0.25f + 0.55f * g), Offset(inset, bh * 0.45f), Size(bw - inset * 2, bh * 0.55f - bev), CornerRadius(rb * 0.8f))
+                            }
                             if (mode == LabelMode.All) {
                                 val t = measurer.measure(PianoLayout.name(bn, solfege, flats), blackLabelStyle)
                                 drawText(t, topLeft = Offset((bw - t.size.width) / 2, bh - bev - t.size.height - 4 * dp1))

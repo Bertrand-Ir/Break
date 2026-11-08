@@ -272,6 +272,7 @@ private fun AboutSection() {
         Text("Synth engine — TinySoundFont by Bernhard Schelling (MIT)", style = Type.Body, color = Brand.Mist)
         Text("Audio I/O — Oboe by Google (Apache 2.0)", style = Type.Body, color = Brand.Mist)
         Text("Typeface — Manrope (OFL)", style = Type.Body, color = Brand.Mist)
+        Text("Song transcription — Basic Pitch by Spotify (Apache 2.0), run on-device with LiteRT", style = Type.Body, color = Brand.Mist)
         PhotoCredits()
     }
 }

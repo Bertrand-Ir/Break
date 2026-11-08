@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Loop
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
@@ -93,6 +94,7 @@ fun TopBar(
             BeatGroup(state, userBeatName, compact = true) { toggle(Panel.Beats) }
             LooperGroup(state)
             RecorderGroup(recorder) { toggle(Panel.Recordings) }
+            LearnButton(state) { toggle(Panel.Learn) }
             IconChip(Icons.Rounded.Tune, "Settings", active = state.panel == Panel.Settings, badge = updateBadge) { toggle(Panel.Settings) }
         }
         return
@@ -117,6 +119,7 @@ fun TopBar(
                 BeatGroup(state, userBeatName, compact = compact) { toggle(Panel.Beats) }
                 LooperGroup(state)
                 RecorderGroup(recorder) { toggle(Panel.Recordings) }
+                LearnButton(state) { toggle(Panel.Learn) }
             }
         }
     }
@@ -319,6 +322,18 @@ private fun RecorderGroup(recorder: Recorder, onOpen: () -> Unit) {
             Spacer(Modifier.width(6.dp))
             Icon(Icons.Rounded.LibraryMusic, "Recordings", tint = Brand.Mist, modifier = Modifier.size(16.dp))
         }
+    }
+}
+
+@Composable
+private fun LearnButton(state: BreakState, onClick: () -> Unit) {
+    Row(
+        Modifier.height(44.dp).control(state.panel == Panel.Learn).pressScale(onClick).padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(Icons.Rounded.School, "Learn songs", tint = Brand.Ivory, modifier = Modifier.size(19.dp))
+        Text("Learn", style = Type.Label, color = Brand.Ivory)
     }
 }
 

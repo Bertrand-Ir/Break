@@ -31,6 +31,9 @@ object Brand {
     val Rec = Color(0xFFE5303F)        // record / destructive
     val Felt = Color(0xFF4A0E18)
     val Success = Color(0xFF59D99B)
+    // Learning mode: which hand plays the note
+    val HandRight = Color(0xFF4EA8F2)
+    val HandLeft = Color(0xFF52C98E)
 }
 
 @OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)

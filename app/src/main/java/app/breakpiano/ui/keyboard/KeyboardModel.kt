@@ -56,12 +56,15 @@ class KeyboardModel {
     val releasedAt = LongArray(128)
     var version by mutableIntStateOf(0)
     var fadeUntil = 0L
+    /** Notified on every key down (true) / up (false) — used by learning mode. */
+    var listener: ((Int, Boolean) -> Unit)? = null
 
     fun press(note: Int, velocity: Float) {
         if (note !in 0..127) return
         NativeEngine.noteOn(note, velocity)
         down[note]++
         version++
+        listener?.invoke(note, true)
     }
 
     fun release(note: Int) {
@@ -69,6 +72,7 @@ class KeyboardModel {
         down[note]--
         if (down[note] == 0) {
             NativeEngine.noteOff(note)
+            listener?.invoke(note, false)
             val now = SystemClock.uptimeMillis()
             releasedAt[note] = now
             fadeUntil = now + GLOW_FADE_MS

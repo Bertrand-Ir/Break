@@ -19,7 +19,7 @@ import kotlin.reflect.KProperty
 
 enum class LabelMode(val title: String) { Off("Off"), C("C only"), White("White keys"), All("All keys") }
 enum class Notation(val title: String) { Letters("C D E"), Solfege("Do Ré Mi") }
-enum class Panel { None, Instruments, Beats, Metronome, Recordings, Settings }
+enum class Panel { None, Instruments, Beats, Metronome, Recordings, Settings, Learn }
 
 /**
  * Single source of truth for the whole app. Every setting is Compose-observable, persisted to

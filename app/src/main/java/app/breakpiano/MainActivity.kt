@@ -18,6 +18,8 @@ import androidx.lifecycle.lifecycleScope
 import app.breakpiano.audio.BeatLibrary
 import app.breakpiano.audio.NativeEngine
 import app.breakpiano.audio.Previewer
+import app.breakpiano.learn.Learner
+import app.breakpiano.learn.SongLibrary
 import app.breakpiano.audio.Recorder
 import app.breakpiano.audio.Take
 import app.breakpiano.audio.UserBeat
@@ -37,6 +39,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var recorder: Recorder
     private lateinit var updater: Updater
     private lateinit var previewer: Previewer
+    private lateinit var songLibrary: SongLibrary
+    private lateinit var learner: Learner
+    private var importStage by mutableStateOf<Pair<String, Float>?>(null)
     private val model = KeyboardModel()
 
     private var ready by mutableStateOf(false)
@@ -45,6 +50,12 @@ class MainActivity : ComponentActivity() {
 
     private val pickAudio = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) importBeat(uri)
+    }
+    private val pickSongAudio = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importSong(uri, midi = false)
+    }
+    private val pickSongMidi = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importSong(uri, midi = true)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,6 +72,9 @@ class MainActivity : ComponentActivity() {
         recorder = Recorder(this, lifecycleScope)
         updater = Updater(applicationContext, lifecycleScope)
         previewer = Previewer(lifecycleScope)
+        songLibrary = SongLibrary(this)
+        learner = Learner(songLibrary, state, lifecycleScope)
+        model.listener = { note, down -> learner.onKey(note, down) }
 
         lifecycleScope.launch {
             val ok = withContext(Dispatchers.Default) { NativeEngine.load(assets, NativeEngine.SOUNDFONT) }
@@ -82,6 +96,13 @@ class MainActivity : ComponentActivity() {
                     recorder = recorder,
                     updater = updater,
                     previewer = previewer,
+                    learner = learner,
+                    songs = songLibrary.songs,
+                    importStage = importStage,
+                    onImportSongAudio = { pickSongAudio.launch(arrayOf("audio/*", "video/mp4")) },
+                    onImportSongMidi = { pickSongMidi.launch(arrayOf("audio/midi", "audio/x-midi", "audio/mid", "application/x-midi", "audio/sp-midi")) },
+                    onLearnSong = { s -> state.panel = app.breakpiano.data.Panel.None; learner.open(s) },
+                    onDeleteSong = { s -> if (learner.song?.id == s.id) learner.close(); songLibrary.delete(s) },
                     ready = ready,
                     importProgress = importProgress,
                     onImport = { pickAudio.launch(arrayOf("audio/*")) },
@@ -118,6 +139,7 @@ class MainActivity : ComponentActivity() {
         recorder.stop()
         recorder.stopPlayback()
         previewer.stop()
+        learner.pause()
         model.releaseAll()
         if (loaded) NativeEngine.stop()
         state.onEngineStopped()
@@ -181,6 +203,19 @@ class MainActivity : ComponentActivity() {
             state.userTrackId = null
         }
         beats.delete(beat)
+    }
+
+    private fun importSong(uri: Uri, midi: Boolean) = lifecycleScope.launch {
+        importStage = (if (midi) "Reading MIDI…" else "Reading the song…") to 0f
+        try {
+            val song = if (midi) songLibrary.importMidi(uri)
+            else songLibrary.importAudio(uri) { label, p -> runOnUiThread { importStage = label to p } }
+            state.toast = "“${song.title}” is ready to learn"
+        } catch (t: Throwable) {
+            state.toast = t.message?.takeIf { it.length < 90 } ?: "Couldn't read that file"
+        } finally {
+            importStage = null
+        }
     }
 
     private fun shareTake(take: Take) {

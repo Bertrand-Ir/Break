@@ -92,7 +92,7 @@ android {
 
     // The soundfont is read straight from the APK via mmap — keep it uncompressed.
     androidResources {
-        noCompress += listOf("sf2")
+        noCompress += listOf("sf2", "tflite")
     }
 
     compileOptions {
@@ -129,5 +129,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.google.oboe:oboe:1.9.3")
+    // On-device note transcription (Spotify Basic Pitch model)
+    implementation("com.google.ai.edge.litert:litert:1.4.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    testImplementation("junit:junit:4.13.2")
 }

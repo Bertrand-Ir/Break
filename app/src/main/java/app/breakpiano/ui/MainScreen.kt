@@ -45,6 +45,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import app.breakpiano.audio.NativeEngine
 import app.breakpiano.audio.Previewer
+import app.breakpiano.learn.Learner
+import app.breakpiano.learn.Song
+import app.breakpiano.ui.learn.LearnBar
+import app.breakpiano.ui.learn.SongsModal
 import app.breakpiano.audio.Recorder
 import app.breakpiano.audio.Take
 import app.breakpiano.audio.UserBeat
@@ -66,6 +70,13 @@ fun MainScreen(
     recorder: Recorder,
     updater: Updater,
     previewer: Previewer,
+    learner: Learner,
+    songs: List<Song>,
+    importStage: Pair<String, Float>?,
+    onImportSongAudio: () -> Unit,
+    onImportSongMidi: () -> Unit,
+    onLearnSong: (Song) -> Unit,
+    onDeleteSong: (Song) -> Unit,
     ready: Boolean,
     importProgress: Float?,
     onImport: () -> Unit,
@@ -77,8 +88,12 @@ fun MainScreen(
     LaunchedEffect(ready) {
         if (!ready) return@LaunchedEffect
         var gc = 0
+        var last = 0L
         while (true) {
-            withFrameMillis {
+            withFrameMillis { now ->
+                val dt = if (last == 0L) 0f else ((now - last) / 1000f).coerceAtMost(0.1f)
+                last = now
+                learner.tick(dt)
                 state.pollEngine()
                 if (SystemClock.uptimeMillis() < model.fadeUntil + 34) model.version++
                 if (++gc % 60 == 0) NativeEngine.collectGarbage()
@@ -98,6 +113,7 @@ fun MainScreen(
 
         Column(Modifier.fillMaxSize()) {
             TopBar(state, recorder, userBeatName, updateBadge = updater.state is UpdateState.Available)
+            if (learner.active) LearnBar(learner, Modifier.padding(bottom = 6.dp))
             // Piano body: lacquered case around the action
             Box(
                 Modifier
@@ -114,7 +130,9 @@ fun MainScreen(
                         .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.07f), Color.Transparent))),
                 )
                 Column(Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
-                    if (state.dualKeyboard) {
+                    if (learner.active) {
+                        KeyboardRow(model, state, state.upperStart, { state.upperStart = it }, Modifier.fillMaxSize().padding(bottom = 4.dp), learner)
+                    } else if (state.dualKeyboard) {
                         KeyboardRow(model, state, state.upperStart, { state.upperStart = it }, Modifier.weight(1f).fillMaxWidth())
                         Spacer(Modifier.height(4.dp))
                         KeyboardRow(model, state, state.lowerStart, { state.lowerStart = it }, Modifier.weight(1f).fillMaxWidth().padding(bottom = 4.dp))
@@ -153,6 +171,12 @@ fun MainScreen(
             enter = fadeIn(tween(160)) + scaleIn(initialScale = 0.97f),
             exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.97f),
         ) { BeatsModal(state, userBeats, importProgress, onImport, onPlayUserBeat, onDeleteUserBeat) }
+
+        AnimatedVisibility(
+            visible = state.panel == Panel.Learn,
+            enter = fadeIn(tween(160)) + scaleIn(initialScale = 0.97f),
+            exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.97f),
+        ) { SongsModal(state, songs, importStage, onImportSongAudio, onImportSongMidi, onLearnSong, onDeleteSong) }
 
         AnimatedVisibility(
             visible = state.panel == Panel.Settings,
