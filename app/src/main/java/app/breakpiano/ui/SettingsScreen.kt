@@ -164,11 +164,7 @@ private fun TouchSettings(state: BreakState) {
         SliderRow("Fixed velocity", state.fixedVelocity, { state.fixedVelocity = it }, "${(state.fixedVelocity * 127).roundToInt()}", range = 0.2f..1f)
     }
     SectionLabel("Pedal")
-    val lengths = listOf(0.8f, 1.6f, 3.0f)
-    SettingRow("Pedal length", "How long notes keep ringing after you lift your finger while Pedal is on") {
-        Segmented(listOf("Short", "Medium", "Long"), lengths.indexOfFirst { kotlin.math.abs(it - state.pedalLength) < 0.05f },
-            { state.pedalLength = lengths[it] }, Modifier.width(260.dp))
-    }
+    PedalAdjuster(state, Modifier.fillMaxWidth().padding(bottom = 6.dp))
     SectionLabel("Feel")
     ToggleRow("Glissando", "Slide your finger across keys to sweep notes", state.glissando) { state.glissando = it }
     ToggleRow("Haptic tap", "A light tick on every key press", state.haptics) { state.haptics = it }

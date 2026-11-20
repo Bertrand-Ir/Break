@@ -6,6 +6,9 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +39,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -162,14 +166,37 @@ private fun TransposeControl(state: BreakState) {
 
 @Composable
 private fun PedalButton(state: BreakState, showLabel: Boolean) {
-    Row(
-        Modifier.height(44.dp).control(state.pedal).pressScale({ state.togglePedal() }).padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Led(state.pedal)
-        PedalGlyph(contentColor(state.pedal), pressed = state.pedal)
-        if (showLabel) Text("Pedal", style = Type.Label, color = contentColor(state.pedal))
+    var adjusting by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    Box {
+        // left: pedal on / off — right: how long it rings (tap to fine-tune)
+        Row(Modifier.height(44.dp).well(RoundedCornerShape(13.dp)).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.height(38.dp).control(state.pedal, RoundedCornerShape(10.dp)).pressScale({ state.togglePedal() }).padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                Led(state.pedal)
+                PedalGlyph(contentColor(state.pedal), pressed = state.pedal)
+                if (showLabel) Text("Pedal", style = Type.Label, color = contentColor(state.pedal))
+            }
+            Box(Modifier.fillMaxHeight().pressScale({ adjusting = !adjusting }).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                Text(PedalScale.label(state.pedalLength), style = Type.Mono, color = Brand.Ivory)
+            }
+        }
+        if (adjusting) {
+            androidx.compose.ui.window.Popup(
+                alignment = Alignment.TopEnd,
+                offset = androidx.compose.ui.unit.IntOffset(0, with(androidx.compose.ui.platform.LocalDensity.current) { 50.dp.roundToPx() }),
+                onDismissRequest = { adjusting = false },
+                properties = androidx.compose.ui.window.PopupProperties(focusable = true),
+            ) {
+                PedalAdjuster(
+                    state,
+                    Modifier.width(380.dp).clip(RoundedCornerShape(18.dp)).background(Brand.Graphite)
+                        .border(1.dp, Brand.Line, RoundedCornerShape(18.dp)).padding(16.dp),
+                )
+            }
+        }
     }
 }
 
