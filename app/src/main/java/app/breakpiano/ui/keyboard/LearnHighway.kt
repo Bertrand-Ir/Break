@@ -97,6 +97,21 @@ fun LearnHighway(learner: Learner, state: BreakState, start: () -> Float, visibl
                 drawRect(Color.White.copy(alpha = if (isC) 0.08f else 0.025f), Offset(x, 0f), Size(dp1, h))
             }
 
+            // bar lines for written-out songs (AI / ABC), with bar numbers
+            val barSec = learner.song?.barSeconds ?: 0f
+            if (barSec > 0f) {
+                val firstBar = kotlin.math.floor(pos / barSec).toInt().coerceAtLeast(0)
+                val lastBar = kotlin.math.ceil((pos + look) / barSec).toInt()
+                val numStyle = TextStyle(fontFamily = Manrope, fontWeight = FontWeight(700), fontSize = 10.sp, color = Brand.Dim)
+                for (b in firstBar..lastBar) {
+                    val y = h - (b * barSec - pos) / look * h
+                    if (y < 0f || y > h) continue
+                    drawRect(Color.White.copy(alpha = 0.09f), Offset(0f, y), Size(w, dp1))
+                    val t = measurer.measure("${b + 1}", numStyle)
+                    drawText(t, topLeft = Offset(4 * dp1, y - t.size.height - dp1))
+                }
+            }
+
             // lanes for what's next: a soft column from the note down to its key
             for (p in learner.nextPitches) {
                 val (x, bw) = keyLane(p, s, ww)

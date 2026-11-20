@@ -133,4 +133,5 @@ dependencies {
     implementation("com.google.ai.edge.litert:litert:1.4.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")   // real org.json for JVM unit tests
 }

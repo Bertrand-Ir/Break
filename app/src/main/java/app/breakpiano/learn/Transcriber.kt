@@ -15,7 +15,8 @@ import kotlin.math.min
 import kotlin.math.sin
 
 /** One transcribed / imported note. Times in seconds. */
-data class SongNote(val start: Float, val end: Float, val pitch: Int, val velocity: Float)
+/** One note. [hand]: 0 right, 1 left, -1 unknown (decided by pitch). */
+data class SongNote(val start: Float, val end: Float, val pitch: Int, val velocity: Float, val hand: Int = -1)
 
 /**
  * Audio → piano notes, fully on-device, using Spotify's Basic Pitch model (Apache-2.0).

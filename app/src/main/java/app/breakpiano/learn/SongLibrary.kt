@@ -30,10 +30,17 @@ data class Song(
     val notesVersion: Int = 1,
     /** Clean-up level for sung songs: 0 Gentle, 1 Balanced, 2 Strict. */
     val cleanLevel: Int = 1,
+    /** Written-out songs (AI / ABC) know their tempo, time signature and key exactly. */
+    val bpm: Float = 0f,
+    val meterNum: Int = 0,
+    val meterDen: Int = 0,
+    val keyName: String = "",
 ) {
+    val isScore get() = source == "ai" || source == "abc"
+    val barSeconds get() = if (bpm > 0f && meterNum > 0 && meterDen > 0) (meterNum * 4f / meterDen) * 60f / bpm else 0f
     val hasAudio get() = frames > 0
     val isVoice get() = source == "voice"
-    val sourceLabel get() = when (source) { "midi" -> "MIDI"; "listen" -> "Listened"; "voice" -> "Sung"; else -> "Transcribed" }
+    val sourceLabel get() = when (source) { "midi" -> "MIDI"; "listen" -> "Listened"; "voice" -> "Sung"; "ai" -> "Song file"; "abc" -> "ABC"; else -> "Transcribed" }
 }
 
 /** Songs you learn: transcribed from audio (keeps the audio for play-along) or imported MIDI. */
@@ -52,7 +59,8 @@ class SongLibrary(context: Context) {
                     val o = arr.getJSONObject(i)
                     val s = Song(o.getString("id"), o.getString("title"), o.getLong("dur"), o.getInt("notes"),
                         o.optBoolean("midi"), o.optInt("rate"), o.optInt("frames"),
-                        o.optString("source", if (o.optBoolean("midi")) "midi" else "file"), o.optInt("nv", 1), o.optInt("cl", 1))
+                        o.optString("source", if (o.optBoolean("midi")) "midi" else "file"), o.optInt("nv", 1), o.optInt("cl", 1),
+                        o.optDouble("bpm", 0.0).toFloat(), o.optInt("mn", 0), o.optInt("md", 0), o.optString("key", ""))
                     if (notesFile(s.id).exists()) songs += s
                 }
             }
@@ -66,14 +74,19 @@ class SongLibrary(context: Context) {
         val arr = JSONArray()
         songs.forEach { s ->
             arr.put(JSONObject().put("id", s.id).put("title", s.title).put("dur", s.durationMs).put("notes", s.noteCount)
-                .put("midi", s.fromMidi).put("rate", s.sampleRate).put("frames", s.frames).put("source", s.source).put("nv", s.notesVersion).put("cl", s.cleanLevel))
+                .put("midi", s.fromMidi).put("rate", s.sampleRate).put("frames", s.frames).put("source", s.source).put("nv", s.notesVersion).put("cl", s.cleanLevel)
+                .put("bpm", s.bpm.toDouble()).put("mn", s.meterNum).put("md", s.meterDen).put("key", s.keyName))
         }
         index.writeText(arr.toString())
     }
 
     private fun writeNotes(id: String, notes: List<SongNote>) {
         val arr = JSONArray()
-        notes.forEach { n -> arr.put(JSONArray().put(n.start.toDouble()).put(n.end.toDouble()).put(n.pitch).put(n.velocity.toDouble())) }
+        notes.forEach { n ->
+            val a = JSONArray().put(n.start.toDouble()).put(n.end.toDouble()).put(n.pitch).put(n.velocity.toDouble())
+            if (n.hand >= 0) a.put(n.hand)
+            arr.put(a)
+        }
         notesFile(id).writeText(arr.toString())
     }
 
@@ -81,7 +94,7 @@ class SongLibrary(context: Context) {
         val arr = JSONArray(notesFile(song.id).readText())
         List(arr.length()) { i ->
             val a = arr.getJSONArray(i)
-            SongNote(a.getDouble(0).toFloat(), a.getDouble(1).toFloat(), a.getInt(2), a.getDouble(3).toFloat())
+            SongNote(a.getDouble(0).toFloat(), a.getDouble(1).toFloat(), a.getInt(2), a.getDouble(3).toFloat(), a.optInt(4, -1))
         }
     }
 
@@ -164,6 +177,23 @@ class SongLibrary(context: Context) {
         val i = songs.indexOfFirst { it.id == song.id }
         if (i >= 0 && title.isNotBlank()) { songs[i] = song.copy(title = title.trim()); save() }
     }
+
+    /** A song written out as text — the Break song format from an AI, or ABC notation. */
+    suspend fun importScore(text: String): Pair<Song, List<String>> = withContext(Dispatchers.Default) {
+        val score = ScoreParser.parse(text)
+        val id = UUID.randomUUID().toString().take(12)
+        writeNotes(id, score.notes)
+        val song = Song(
+            id, score.title, ((score.notes.maxOf { it.end } + 0.5f) * 1000).toLong(), score.notes.size, fromMidi = false,
+            source = if (score.format == "ABC") "abc" else "ai",
+            bpm = score.bpm, meterNum = score.meterNum, meterDen = score.meterDen, keyName = score.key,
+        )
+        withContext(Dispatchers.Main) { songs.add(0, song); save() }
+        song to score.warnings
+    }
+
+    fun readText(uri: Uri): String =
+        app.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: error("Couldn't open that file.")
 
     suspend fun importMidi(uri: Uri): Song = withContext(Dispatchers.IO) {
         val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("Couldn't open that file.")

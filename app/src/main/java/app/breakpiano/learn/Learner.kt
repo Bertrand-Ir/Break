@@ -98,13 +98,13 @@ class Learner(private val library: SongLibrary, private val state: BreakState, p
             loading = true
             raw = library.loadNotes(s).let {
                 when {
-                    s.fromMidi -> it
+                    s.fromMidi || s.isScore -> it
                     s.isVoice && s.notesVersion >= 2 -> it          // voice tracker output is already clean
                     else -> Arrange.clean(it, voice = s.isVoice)
                 }
             }
             song = s
-            arrangement = if (s.fromMidi || s.isVoice) Arrangement.Full else Arrangement.Melody
+            arrangement = if (s.fromMidi || s.isVoice || s.isScore) Arrangement.Full else Arrangement.Melody
             notes = build(raw, arrangement)
             hitFlags = BooleanArray(notes.size)
             listen = Listen.Piano

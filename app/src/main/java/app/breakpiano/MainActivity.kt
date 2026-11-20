@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
         if (uri != null) importBeat(uri)
     }
     private val pickSongAudio = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) importSong(uri, midi = false)
+        if (uri != null) importAnything(uri)
     }
     private val pickSongMidi = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) importSong(uri, midi = true)
@@ -111,7 +111,10 @@ class MainActivity : ComponentActivity() {
                     learner = learner,
                     songs = songLibrary.songs,
                     importStage = importStage,
-                    onImportSongAudio = { pickSongAudio.launch(arrayOf("audio/*", "video/mp4")) },
+                    onImportSongAudio = {
+                        pickSongAudio.launch(arrayOf("audio/*", "video/mp4", "audio/midi", "audio/x-midi", "application/x-midi",
+                            "application/json", "text/*", "application/octet-stream"))
+                    },
                     onImportSongMidi = { pickSongMidi.launch(arrayOf("audio/midi", "audio/x-midi", "audio/mid", "application/x-midi", "audio/sp-midi")) },
                     onLearnSong = { s -> state.panel = app.breakpiano.data.Panel.None; learner.open(s) },
                     onDeleteSong = { s -> if (learner.song?.id == s.id) learner.close(); songLibrary.delete(s) },
@@ -273,6 +276,36 @@ class MainActivity : ComponentActivity() {
             state.toast = t.message?.takeIf { it.length < 100 } ?: "Couldn't listen — please try again"
         } finally {
             importStage = null
+        }
+    }
+
+    /** A song file (Break song format or ABC notation) — played exactly as written. */
+    private fun importSongFile(uri: Uri) = lifecycleScope.launch {
+        importStage = "Reading the song…" to 0.5f
+        try {
+            val (song, warnings) = songLibrary.importScore(songLibrary.readText(uri))
+            state.toast = if (warnings.isEmpty()) "“${song.title}” is ready — tap Learn this song"
+            else "“${song.title}” is ready (${warnings.size} bar${if (warnings.size > 1) "s" else ""} didn't add up — kept as written)"
+        } catch (t: Throwable) {
+            state.toast = t.message?.takeIf { it.length < 110 } ?: "Couldn't read that song file"
+        } finally {
+            importStage = null
+        }
+    }
+
+    /** One Import button: MIDI, a written-out song (Break song / ABC), or any audio. */
+    private fun importAnything(uri: Uri) {
+        val name = runCatching {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        }.getOrNull().orEmpty().lowercase()
+        val mime = contentResolver.getType(uri).orEmpty()
+        when {
+            name.endsWith(".mid") || name.endsWith(".midi") || "midi" in mime -> importSong(uri, midi = true)
+            name.endsWith(".json") || name.endsWith(".abc") || name.endsWith(".txt") || mime.startsWith("text/") || mime == "application/json" ->
+                importSongFile(uri)
+            else -> importSong(uri, midi = false)
         }
     }
 

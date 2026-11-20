@@ -96,7 +96,16 @@ object Arrange {
         return out
     }
 
-    fun build(raw: List<SongNote>, mode: Arrangement): List<LearnNote> = when (mode) {
+    fun build(raw: List<SongNote>, mode: Arrangement): List<LearnNote> {
+        if (raw.any { it.hand >= 0 }) {
+            // a written-out score: Melody = its right hand, the rest = both hands as written
+            val all = raw.map { LearnNote(it.start, it.end, it.pitch, it.velocity, if (it.hand >= 0) it.hand else if (it.pitch < 60) 1 else 0) }
+            return if (mode == Arrangement.Melody) all.filter { it.hand == 0 }.ifEmpty { all } else all
+        }
+        return buildGuessed(raw, mode)
+    }
+
+    private fun buildGuessed(raw: List<SongNote>, mode: Arrangement): List<LearnNote> = when (mode) {
         Arrangement.Full -> raw.map { LearnNote(it.start, it.end, it.pitch, it.velocity, if (it.pitch < 60) 1 else 0) }
         Arrangement.Melody -> melody(raw).map { LearnNote(it.start, it.end, it.pitch, it.velocity, 0) }
         Arrangement.MelodyBass -> {

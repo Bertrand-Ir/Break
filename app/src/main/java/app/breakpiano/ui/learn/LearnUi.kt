@@ -152,9 +152,7 @@ fun SongsModal(
             Spacer(Modifier.weight(1f))
             PrimaryButton("Listen", Modifier.height(40.dp), icon = Icons.Rounded.Mic) { if (importStage == null) listen.onOpen() }
             Spacer(Modifier.width(8.dp))
-            GhostButton("Import audio", Modifier.height(40.dp), icon = Icons.Rounded.GraphicEq) { if (importStage == null && !listen.mic.recording) onImportAudio() }
-            Spacer(Modifier.width(8.dp))
-            GhostButton("Import MIDI", Modifier.height(40.dp), icon = Icons.Rounded.MusicNote) { if (importStage == null && !listen.mic.recording) onImportMidi() }
+            GhostButton("Import", Modifier.height(40.dp), icon = Icons.Rounded.GraphicEq) { if (importStage == null && !listen.mic.recording) onImportAudio() }
         },
     ) {
         LazyVerticalGrid(
@@ -230,7 +228,10 @@ private fun SongCard(song: Song, onLearn: () -> Unit, onDelete: () -> Unit, onEd
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f).clickable(onClick = onEdit)) {
                 Text(song.title, style = Type.Heading, color = Brand.Ivory, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${t(song.durationMs / 1000f)} · ${song.noteCount} notes · ${song.sourceLabel}",
+                Text(
+                    if (song.isScore) listOfNotNull(t(song.durationMs / 1000f), "${song.bpm.toInt()} BPM", song.keyName.ifBlank { null },
+                        "${song.meterNum}/${song.meterDen}", song.sourceLabel).joinToString(" · ")
+                    else "${t(song.durationMs / 1000f)} · ${song.noteCount} notes · ${song.sourceLabel}",
                     style = Type.Body, color = Brand.Mist)
             }
             Box(Modifier.size(36.dp).clip(CircleShape).pressScale(onEdit), contentAlignment = Alignment.Center) {
@@ -400,3 +401,4 @@ private fun ConfirmDelete(song: Song, onConfirm: () -> Unit, onDismiss: () -> Un
         }
     }
 }
+
